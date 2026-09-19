@@ -1,10 +1,10 @@
-package com.EnergyMonitor.ms_security;
+package com.EnergyMonitor.security_service;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class MsSecurityApplicationTests {
+class SecurityServiceApplicationTests {
 
 	@Test
 	void contextLoads() {

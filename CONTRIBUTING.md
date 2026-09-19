@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to `ms-security`. Before touching any code, please read the project's Git workflow and commit conventions:
+Thanks for contributing to `security-service`. Before touching any code, please read the project's Git workflow and commit conventions:
 
 📄 **[Git Conventions](https://github.com/code-sena/en-monitor-docs/blob/main/00-governance/git-conventions.md)**
 

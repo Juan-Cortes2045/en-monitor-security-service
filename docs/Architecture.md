@@ -1,11 +1,11 @@
 # Architecture
 
-`ms-security` follows **Hexagonal Architecture (Ports and Adapters)**. The goal is to keep business logic isolated from frameworks and technical details, so the domain can be tested, understood, and evolved independently of Spring, JPA, or HTTP.
+`security-service` follows **Hexagonal Architecture (Ports and Adapters)**. The goal is to keep business logic isolated from frameworks and technical details, so the domain can be tested, understood, and evolved independently of Spring, JPA, or HTTP.
 
 ## Layers
 
 ```
-ms-security
+security-service
 │
 ├── adapter
 │   ├── in
@@ -139,7 +139,7 @@ The application layer only knows the domain model and the repository port (`User
 
 ## Security responsibilities inside this microservice
 
-`Security` is treated as a single **bounded context**, not split into several smaller microservices. Authentication, authorization, sessions, credentials, and auditing all live inside `ms-security`, separated internally by layers rather than by deployment unit.
+`Security` is treated as a single **bounded context**, not split into several smaller microservices. Authentication, authorization, sessions, credentials, and auditing all live inside `security-service`, separated internally by layers rather than by deployment unit.
 
 - **Authentication** answers: *who is the user?*
 - **Authorization** answers: *what can the user do?*
@@ -150,13 +150,13 @@ Authorization here uses **RBAC (Role-Based Access Control)**:
 User → UserSystemRole → SystemRole → SystemRolePermission → Permission
 ```
 
-`SystemRole` (e.g. `ADMIN`, `USER`) is a **global system role**, managed entirely within `ms-security`. It is a different concept from a "Home Role" (e.g. `OWNER`, `MEMBER`), which will belong to the Home microservice and represents a user's role within a specific household — the two must never be mixed.
+`SystemRole` (e.g. `ADMIN`, `USER`) is a **global system role**, managed entirely within `security-service`. It is a different concept from a "Home Role" (e.g. `OWNER`, `MEMBER`), which will belong to the Home microservice and represents a user's role within a specific household — the two must never be mixed.
 
 ## Boundaries with other microservices
 
 - Each domain (Security, Home, Devices, Measurements, Notifications, Recommendations) is developed and versioned in its **own Git repository**.
 - All microservices currently share a single physical **MySQL** database, organized logically by domain. This is a deployment convenience, not a license to share code.
-- **Database schema migrations live in a separate repository.** `ms-security` only connects to an already-migrated schema using connection credentials — it does not own or manage the schema.
+- **Database schema migrations live in a separate repository.** `security-service` only connects to an already-migrated schema using connection credentials — it does not own or manage the schema.
 - No microservice may import another microservice's entities, repositories, or internal classes directly (e.g. Home Service must never import `UserEntity` or `UserRepository` from Security). Cross-domain communication happens through **APIs, events, or well-defined contracts**, referencing other domains by ID only.
 - Physical database separation per microservice may happen in the future; it is not a current requirement.
 
