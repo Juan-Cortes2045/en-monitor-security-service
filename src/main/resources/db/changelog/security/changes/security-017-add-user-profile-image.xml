@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        The avatar belongs to the account, not to the human behind it: it is what a client
+        renders for a user record and it lives for as long as the account does. Nullable so
+        existing accounts keep working with no image set.
+    -->
+    <changeSet id="security-017-add-user-profile-image" author="JuanCortes2045">
+        <comment>Profile image on user. Nullable: an account may have no avatar.</comment>
+        <addColumn tableName="user">
+            <column name="profile_image" type="VARCHAR(255)"/>
+        </addColumn>
+
+        <rollback>
+            <dropColumn tableName="user" columnName="profile_image"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

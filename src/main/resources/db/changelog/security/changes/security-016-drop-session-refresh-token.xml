@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        The session no longer carries a credential. Refresh tokens live in refresh_token, with
+        one row per generation, and leaving the old column in place would keep two sources of
+        truth for the same secret: one current, one stale.
+
+        Verified before this changeset: user_session held 0 rows, so nothing needed migrating
+        and no session is lost. A deployment that does hold sessions must copy each row into
+        refresh_token as a root generation before running this changeset.
+    -->
+    <changeSet id="security-016-drop-session-refresh-token" author="JuanCortes2045">
+        <comment>Drops user_session.refresh_token now that refresh_token owns the credential. Requires an empty or migrated user_session.</comment>
+        <dropUniqueConstraint tableName="user_session"
+                             constraintName="uk_user_session_refresh_token"/>
+        <dropColumn tableName="user_session" columnName="refresh_token"/>
+
+        <rollback>
+            <addColumn tableName="user_session">
+                <column name="refresh_token" type="VARCHAR(255)"/>
+            </addColumn>
+            <addUniqueConstraint tableName="user_session"
+                                 columnNames="refresh_token"
+                                 constraintName="uk_user_session_refresh_token"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

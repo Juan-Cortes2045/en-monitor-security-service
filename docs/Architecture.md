@@ -1,172 +1,123 @@
 # Architecture
 
-`security-service` follows **Hexagonal Architecture (Ports and Adapters)**. The goal is to keep business logic isolated from frameworks and technical details, so the domain can be tested, understood, and evolved independently of Spring, JPA, or HTTP.
+`security-service` follows **Hexagonal Architecture (Ports and Adapters)**. Business logic stays
+isolated from frameworks and technical details, so the domain can be tested, understood and
+evolved independently of Spring, JPA or HTTP.
+
+The code is the `security` module of `energy-monitor-backend`, moved out unchanged in its
+structure: same package (`com.energymonitor.security`), same use cases, same tests.
 
 ## Layers
 
 ```
-security-service
+com.energymonitor.security
 │
-├── adapter
-│   ├── in
-│   │   └── web            → Controllers (entry points)
-│   └── out
-│       ├── client         → External service clients (e.g. email)
-│       ├── persistence    → JPA repositories, entities, mappers
-│       └── security       → Technical security implementations (JWT, hashing)
-│
-├── application
-│   ├── port
-│   │   ├── in             → Input ports (not yet defined; use cases act as entry contracts)
-│   │   └── out            → Output ports (interfaces the application depends on)
-│   └── usecase             → Use cases (application logic coordinators)
-│
+├── api                     → Contracts for other services: account events, profile and
+│                             administrator queries, mail delivery requests
 ├── domain
-│   ├── model               → Domain models (business entities)
-│   ├── valueobject          → Value objects
-│   └── exception            → Domain exceptions
-│
-└── infrastructure
-    ├── config              → Spring Security, OAuth2, OpenAPI configuration
-    ├── exception           → Global exception handling
-    └── observability       → Monitoring/observability concerns
+│   ├── model               → Domain models, value objects and domain exceptions
+│   └── service             → Domain services (pure rules, no framework)
+├── application
+│   ├── command, result     → Input and output of the use cases
+│   ├── exception           → Application exceptions
+│   ├── port/in             → Use case interfaces
+│   ├── port/out            → Interfaces the application depends on
+│   └── usecase             → Use case implementations (no Spring annotations)
+├── adapter
+│   ├── in/web              → AuthController, AdminController, SecurityExceptionHandler
+│   └── out
+│       ├── persistence     → JPA entities, Spring Data repositories, mappers, adapters
+│       ├── security        → BCrypt, token generation and hashing, Google OAuth client
+│       ├── event           → Account event publisher
+│       └── mail            → Mail delivery requests (see "Migration status")
+└── infrastructure          → Spring wiring: filter chain, JWT, CORS, RBAC authorization,
+                              executors and configuration properties
 ```
 
 ### Domain
 
-The core of the business. Contains domain models, value objects, and domain exceptions. It has **no dependency on Spring, JPA, HTTP, or any external framework** — this layer should compile and be testable in complete isolation.
-
-Current domain models:
-
-```
-Person, User, UserConfiguration, PasswordResetToken, UserSession,
-SecurityConfiguration, PasswordPolicy, LoginErrorLog (ErrorLog),
-Role, Permission, Audit
-```
-
-Value objects:
-
-```
-UserStatus, LoginErrorType, AuditAction
-```
-
-Domain exceptions:
-
-```
-AccountBlockedException, AccountInactiveException, InvalidCredentialsException,
-TokenAlreadyUsedException, TokenExpiredException, UserNotFoundException
-```
+The core of the business. It has **no dependency on Spring, JPA, HTTP or any external
+framework**, so it compiles and is testable in isolation.
 
 ### Application
 
-Coordinates use cases — the operations the system exposes. A use case orchestrates domain models and output ports; it does not contain persistence, HTTP, or framework-specific code.
+A use case orchestrates domain models and output ports; it contains no persistence, HTTP or
+framework code. The use cases are plain classes, wired in `SecurityApplicationWiring`, and the
+transaction boundaries are applied there, not inside the use cases.
 
-Current use cases:
+### Adapters
 
-```
-AssignPermissionToRoleUseCase      LogoutUseCase
-AssignRoleUseCase                  RefreshSessionUseCase
-AuthenticateUserUseCase            RegisterAuditUseCase
-AuthorizeUserUseCase               RegisterLoginErrorUseCase
-CreateUserUseCase                  RequestPasswordResetUseCase
-DeleteAccountUseCase               ResetPasswordUseCase
-                                    RevokeSessionUseCase
-                                    UpdatePasswordPolicyUseCase
-                                    UpdateSecurityConfigurationUseCase
-                                    UpdateUserConfigurationUseCase
-                                    UpdateUserProfileUseCase
-```
-
-Output ports (interfaces implemented by adapters):
-
-```
-UserRepository, SessionRepository, PasswordResetTokenRepository,
-PasswordPolicyRepository, SecurityConfigurationRepository,
-LoginErrorLogRepository, RoleRepository, PermissionRepository,
-AuditRepository, PasswordHasher, TokenProvider, EmailSender
-```
-
-New use cases should only be added when they represent a **relevant business operation** — not simply as a wrapper around a single entity method.
-
-### Adapter — in (web and mobile)
-
-Entry points that receive external requests (HTTP) and translate them into use case calls. Controllers must stay thin: they receive the request, call a use case, and return a response — no business logic here.
-
-```
-AuditController, AuthController, PasswordController, PermissionController,
-RoleController, SecurityConfigurationController, SessionController, UserController
-```
-
-### Adapter — out (persistence, security, client)
-
-Implements the output ports defined in `application/port/out`. This is where JPA, technical security, and external clients live.
-
-- **persistence** — `*RepositoryAdapter` classes implement the output ports; they delegate to Spring Data `*JpaRepository` interfaces and use `*Mapper` classes to convert between domain models and JPA `*Entity` classes.
-- **security** — `JwtTokenProvider` implements `TokenProvider`; `PasswordHasherImpl` implements `PasswordHasher`.
-- **client** — `EmailSenderClient` implements `EmailSender`.
+- **in/web** — thin controllers under `/api/v1/auth/**` and `/api/v1/admin/users|roles/**`, and
+  one exception handler that renders every error in the shared shape.
+- **out/persistence** — adapters implementing the output ports; they delegate to Spring Data
+  repositories and convert between domain models and JPA entities through mappers.
+- **out/security** — password hashing, secure tokens and identifiers, the pepper-based hash of
+  recovery codes, the attempt limiter and the Google OAuth client.
+- **out/event** — publishes `AccountRegistered`, `AccountAdministered` and `AccountDeleted`.
+- **out/mail** — hands verification and recovery codes to the mail channel.
 
 ### Infrastructure
 
-Cross-cutting configuration: `SecurityConfig`, `AuthorizationServerConfig`, `OpenApiConfig`, global exception handling, and observability setup. This is where Spring-specific wiring lives, kept separate from business logic.
+The filter chain (stateless, bearer tokens only, everything denied unless permitted on purpose),
+the RS256 key pair and the token issuer, CORS, the live RBAC check of the admin routes, and the
+configuration properties.
 
-## Request flow
+## Tokens
 
-```
-HTTP Request
-     ↓
-Controller (adapter/in/web)
-     ↓
-Use Case (application/usecase)
-     ↓
-Domain (domain/model)
-     ↓
-Output Port (application/port/out)
-     ↓
-Adapter (adapter/out/persistence | security | client)
-```
+This service is the only one that **signs** tokens, so it is the only one holding the private key.
 
-## Domain model separation: entity vs. persistence
+- Access token: JWT RS256, 15 minutes, `iss = https://energy-monitor-backend`, `sub` = the
+  account. It carries no roles: permissions are resolved from the database on every request.
+- Refresh token: opaque, stored as a hash, rotated on every use, with reuse detection by family.
 
-Domain models and JPA entities are intentionally different classes, connected through a mapper. This keeps persistence details (JPA annotations, relationships, lazy loading) out of the domain.
+The other services validate access tokens with the **public key** only.
 
-```
-Domain Model  ↔  Mapper  ↔  Persistence Entity
-
-User          ↔  UserMapper  ↔  UserEntity
-```
-
-The application layer only knows the domain model and the repository port (`UserRepository`) — it never depends on the JPA repository (`UserJpaRepository`) or the entity (`UserEntity`) directly.
-
-## Security responsibilities inside this microservice
-
-`Security` is treated as a single **bounded context**, not split into several smaller microservices. Authentication, authorization, sessions, credentials, and auditing all live inside `security-service`, separated internally by layers rather than by deployment unit.
-
-- **Authentication** answers: *who is the user?*
-- **Authorization** answers: *what can the user do?*
-
-Authorization here uses **RBAC (Role-Based Access Control)**:
+## RBAC
 
 ```
 User → UserSystemRole → SystemRole → SystemRolePermission → Permission
 ```
 
-`SystemRole` (e.g. `ADMIN`, `USER`) is a **global system role**, managed entirely within `security-service`. It is a different concept from a "Home Role" (e.g. `OWNER`, `MEMBER`), which will belong to the Home microservice and represents a user's role within a specific household — the two must never be mixed.
+`ADMIN` is a **global role** seeded by `security-025` with `USER.READ`, `USER.MANAGE` and
+`ROLE.MANAGE`. It is a different concept from a home role (`OWNER`, `MEMBER`), which belongs to
+energy-monitor-backend; the two are never mixed, and the global role grants no access to any home.
 
-## Boundaries with other microservices
+## Database
 
-- Each domain (Security, Home, Devices, Measurements, Notifications, Recommendations) is developed and versioned in its **own Git repository**.
-- All microservices currently share a single physical **MySQL** database, organized logically by domain. This is a deployment convenience, not a license to share code.
-- **Database schema migrations live in a separate repository.** `security-service` only connects to an already-migrated schema using connection credentials — it does not own or manage the schema.
-- No microservice may import another microservice's entities, repositories, or internal classes directly (e.g. Home Service must never import `UserEntity` or `UserRepository` from Security). Cross-domain communication happens through **APIs, events, or well-defined contracts**, referencing other domains by ID only.
-- Physical database separation per microservice may happen in the future; it is not a current requirement.
+- The service uses the **same MySQL schema** as energy-monitor-backend (ADR-003) and owns the
+  security tables.
+- Its changesets (`security-001` to `security-025`) live here, under the **same relative path**
+  they had in the monolith (`db/changelog/security/...`). Liquibase identifies a changeset by id,
+  author and file path, so the ones already applied are recognised and never run again.
+- Both services share the `DATABASECHANGELOG` table; each one applies only its own changelogs.
+- A new schema change is always a new changeset with its `rollback`.
+
+## Boundaries with other services
+
+- No service imports another one's entities, repositories or internal classes. Other domains are
+  referenced by identifier only.
+- Communication goes through the contracts in `api`: queries over internal REST endpoints and
+  state changes as events over the message broker (see "Migration status").
+
+## Migration status
+
+| Phase | Content | Status |
+|---|---|---|
+| 1 | Module moved here with its tests and changesets | Done |
+| 2 | RabbitMQ, transactional outbox and events; mail requests over the broker | Pending |
+| 3 | `/internal` endpoints (permissions, profiles, administrators) and the deletion check | Pending |
+| 4 | `security` removed from energy-monitor-backend | Pending |
+| 5 | API gateway | Pending |
+| 6 | Infrastructure, CI/CD and deployment | Pending |
+
+Until phase 2, `UnroutedMailDeliveryAdapter` only logs that a code was not sent (never the code
+itself), and the account events have no listener outside this service.
 
 ## Working principles
 
 1. Preserve the Hexagonal / Ports and Adapters structure.
-2. Keep the domain free of Spring/JPA dependencies.
+2. Keep the domain free of Spring and JPA dependencies.
 3. No business logic in controllers or JPA entities.
-4. Use ports for external dependencies; implement them via adapters.
+4. Use ports for external dependencies; implement them through adapters.
 5. Use mappers between domain and persistence.
-6. Use cases coordinate application logic — avoid duplicating or over-fragmenting them.
-7. Do not restructure existing packages without justifying a real problem first.
-8. Never import another domain's entities or repositories directly.
+6. Never import another domain's entities or repositories.

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">    
+           
+    <changeSet id="security-013-create-audit-log" author="JuanCortes2045">
+        <comment>Audit trail of security-relevant actions. user_id is nullable: the actor may be unknown.</comment>
+        <createTable tableName="audit_log">
+            <column name="id_audit_log" type="VARCHAR(10)">
+                <constraints primaryKey="true" primaryKeyName="pk_audit_log" nullable="false"/>
+            </column>
+            <column name="user_id" type="VARCHAR(10)">
+                <constraints foreignKeyName="fk_audit_log_user_id"
+                             references="user(id_user)"/>
+            </column>
+            <column name="action"
+                    type="ENUM('CREATE', 'UPDATE', 'DELETE', 'LOGIN', 'LOGIN_FAILED', 'LOGOUT')">
+                <constraints nullable="false"/>
+            </column>
+            <column name="description" type="VARCHAR(255)"/>
+            <column name="ip_address" type="VARCHAR(45)"/>
+            <column name="application" type="VARCHAR(255)"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP"
+                    defaultValueComputed="CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+</databaseChangeLog>

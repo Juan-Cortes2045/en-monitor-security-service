@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">    
+       
+   
+    <changeSet id="security-006-create-security-configuration" author="JuanCortes2045">
+        <comment>Key-value security settings applied system wide.</comment>
+        <createTable tableName="security_configuration">
+            <column name="id_security_configuration" type="VARCHAR(10)">
+                <constraints primaryKey="true" primaryKeyName="pk_security_configuration" nullable="false"/>
+            </column>
+            <column name="config_name" type="VARCHAR(100)">
+                <constraints nullable="false" unique="true"
+                             uniqueConstraintName="uk_security_configuration_config_name"/>
+            </column>
+            <column name="config_value" type="VARCHAR(100)"><constraints nullable="false"/></column>
+            <column name="description" type="VARCHAR(255)"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP"
+                    defaultValueComputed="CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+</databaseChangeLog>

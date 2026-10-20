@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">    
+           
+    <changeSet id="security-012-create-system-role-permission" author="JuanCortes2045">
+        <comment>Assignment of a permission to a global role.</comment>
+        <createTable tableName="system_role_permission">
+            <column name="system_role_id" type="VARCHAR(10)">
+                <constraints nullable="false"
+                             foreignKeyName="fk_system_role_permission_system_role_id"
+                             references="system_role(id_system_role)"/>
+            </column>
+            <column name="permission_id" type="VARCHAR(10)">
+                <constraints nullable="false"
+                             foreignKeyName="fk_system_role_permission_permission_id"
+                             references="permission(id_permission)"/>
+            </column>
+            <column name="assigned_at" type="TIMESTAMP"><constraints nullable="false"/></column>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="TIMESTAMP"
+                    defaultValueComputed="CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="TIMESTAMP"/>
+        </createTable>
+
+        <addPrimaryKey tableName="system_role_permission"
+                       columnNames="system_role_id, permission_id"
+                       constraintName="pk_system_role_permission"/>
+    </changeSet>
+</databaseChangeLog>

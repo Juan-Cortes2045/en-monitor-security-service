@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        A Google account does not always have a family name, and an account created by signing in
+        with Google takes its names from it. The web registration form still asks for both.
+    -->
+    <changeSet id="security-023-person-last-name-optional" author="JuanCortes2045">
+        <comment>person.last_name accepts NULL.</comment>
+        <dropNotNullConstraint tableName="person" columnName="last_name" columnDataType="VARCHAR(100)"/>
+
+        <rollback>
+            <sql dbms="mysql">UPDATE person SET last_name = '' WHERE last_name IS NULL</sql>
+            <addNotNullConstraint tableName="person" columnName="last_name" columnDataType="VARCHAR(100)"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
