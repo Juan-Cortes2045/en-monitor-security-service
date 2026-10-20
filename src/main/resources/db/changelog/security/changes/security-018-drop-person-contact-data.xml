@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        person keeps only what describes the human being: name and phone.
+
+        address duplicated home.address, which the home module owns and where the address a
+        user occupies belongs. profile_image moved to user as the account avatar.
+
+        Verified before this changeset: person held 0 rows with address and 0 with
+        profile_image, so nothing is lost. A deployment that does hold values must copy
+        person.profile_image into user.profile_image first; person.address has no destination
+        because home already holds the authoritative copy.
+    -->
+    <changeSet id="security-018-drop-person-contact-data" author="JuanCortes2045">
+        <comment>Removes person.address and person.profile_image. No data to migrate: verified 0 rows in both columns.</comment>
+        <dropColumn tableName="person" columnName="profile_image"/>
+        <dropColumn tableName="person" columnName="address"/>
+
+        <rollback>
+            <addColumn tableName="person">
+                <column name="address" type="VARCHAR(200)"/>
+                <column name="profile_image" type="VARCHAR(255)"/>
+            </addColumn>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

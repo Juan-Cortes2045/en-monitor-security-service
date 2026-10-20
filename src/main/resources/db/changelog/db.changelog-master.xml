@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+        <!--
+            Same relative path as in energy-monitor-backend, on purpose: Liquibase identifies a
+            changeset by id, author and file path, so the changesets the monolith already applied
+            to the shared schema are recognised here as applied and never run twice.
+        -->
+        <include file="security/security-changelog.xml" relativeToChangelogFile="true"/>
+</databaseChangeLog>

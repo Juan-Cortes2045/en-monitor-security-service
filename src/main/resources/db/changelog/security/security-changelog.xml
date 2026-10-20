@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Security module. Order matters: a table is created after every table
+        its foreign keys point to.
+    -->
+
+    <include file="changes/security-001-create-person.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-002-create-user.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-003-create-user-configuration.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-004-create-password-reset-token.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-005-create-user-session.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-006-create-security-configuration.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-007-create-password-policy.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-008-create-login-error-log.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-009-create-system-role.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-010-create-permission.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-011-create-user-system-role.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-012-create-system-role-permission.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-013-create-audit-log.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-014-add-session-revocation.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-015-create-refresh-token.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-016-drop-session-refresh-token.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-017-add-user-profile-image.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-018-drop-person-contact-data.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-019-seed-default-password-policy.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-020-drop-person-cellphone.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-021-add-password-reset-token-attempts.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-022-widen-user-profile-image.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-023-person-last-name-optional.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-024-add-user-google-subject.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-025-seed-admin-role.xml" relativeToChangelogFile="true"/>
+    
+
+</databaseChangeLog>

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Records when and why a session was revoked. Both are nullable so existing rows stay
+        valid: a session that was already revoked before this changeset only carries the
+        boolean flag, and the domain rehydrates that combination on purpose.
+    -->
+    <changeSet id="security-014-add-session-revocation" author="JuanCortes2045">
+        <comment>Revocation instant and reason on user_session. Both nullable: older rows carry the revoked flag alone.</comment>
+        <addColumn tableName="user_session">
+            <column name="revoked_at" type="TIMESTAMP"/>
+            <column name="revoked_reason"
+                    type="ENUM('REFRESH_TOKEN_REUSE', 'PASSWORD_CHANGED', 'ADMINISTRATIVE')"/>
+        </addColumn>
+
+        <rollback>
+            <dropColumn tableName="user_session" columnName="revoked_reason"/>
+            <dropColumn tableName="user_session" columnName="revoked_at"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

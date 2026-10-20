@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        The global ADMIN role and the three permission codes the administration API enforces
+        (PermissionCodes): USER.READ, USER.MANAGE and ROLE.MANAGE.
+
+        No account receives the role here. Granting a global privilege by default would hand the
+        platform to whoever happens to own a given row, so the first administrator is promoted
+        by hand once (see the README) and further administrators are granted from the web.
+
+        The codes are a stable contract (INV-022): the filter chain and the web client both
+        hard-code them.
+    -->
+    <changeSet id="security-025-seed-admin-role" author="JuanCortes2045">
+        <preConditions onFail="MARK_RAN">
+            <sqlCheck expectedResult="0">SELECT COUNT(*) FROM system_role WHERE name = 'ADMIN'</sqlCheck>
+        </preConditions>
+
+        <comment>Seeds the ADMIN global role and the administration permissions.</comment>
+
+        <insert tableName="system_role">
+            <column name="id_system_role" value="rol0000001"/>
+            <column name="name" value="ADMIN"/>
+            <column name="description" value="Platform administrator: manages accounts and global roles."/>
+            <column name="enabled" valueBoolean="true"/>
+        </insert>
+
+        <insert tableName="permission">
+            <column name="id_permission" value="prm0000001"/>
+            <column name="code" value="USER.READ"/>
+            <column name="name" value="Read users"/>
+            <column name="description" value="List accounts and the global roles they hold."/>
+        </insert>
+        <insert tableName="permission">
+            <column name="id_permission" value="prm0000002"/>
+            <column name="code" value="USER.MANAGE"/>
+            <column name="name" value="Manage account status"/>
+            <column name="description" value="Activate, deactivate or block an account."/>
+        </insert>
+        <insert tableName="permission">
+            <column name="id_permission" value="prm0000003"/>
+            <column name="code" value="ROLE.MANAGE"/>
+            <column name="name" value="Manage global roles"/>
+            <column name="description" value="Grant or revoke global roles."/>
+        </insert>
+
+        <insert tableName="system_role_permission">
+            <column name="system_role_id" value="rol0000001"/>
+            <column name="permission_id" value="prm0000001"/>
+            <column name="assigned_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="system_role_permission">
+            <column name="system_role_id" value="rol0000001"/>
+            <column name="permission_id" value="prm0000002"/>
+            <column name="assigned_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="system_role_permission">
+            <column name="system_role_id" value="rol0000001"/>
+            <column name="permission_id" value="prm0000003"/>
+            <column name="assigned_at" valueComputed="CURRENT_TIMESTAMP"/>
+        </insert>
+
+        <rollback>
+            <delete tableName="user_system_role">
+                <where>system_role_id = 'rol0000001'</where>
+            </delete>
+            <delete tableName="system_role_permission">
+                <where>system_role_id = 'rol0000001'</where>
+            </delete>
+            <delete tableName="permission">
+                <where>id_permission IN ('prm0000001', 'prm0000002', 'prm0000003')</where>
+            </delete>
+            <delete tableName="system_role">
+                <where>id_system_role = 'rol0000001'</where>
+            </delete>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

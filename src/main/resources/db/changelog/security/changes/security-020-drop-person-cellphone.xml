@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        The phone number is removed because notifications are email only. A contact channel that
+        nothing delivers to has no reason to be stored against a person.
+
+        This is a scope reduction, not a defect: person now holds only the name, and the account
+        holds the email that is actually used to reach the user.
+
+        A deployment that does hold values in person.cellphone must decide what to do with them
+        before applying this changeset; there is no automatic destination for a phone number.
+    -->
+    <changeSet id="security-020-drop-person-cellphone" author="JuanCortes2045">
+        <comment>Removes person.cellphone. Notifications are email only.</comment>
+        <dropColumn tableName="person" columnName="cellphone"/>
+
+        <rollback>
+            <addColumn tableName="person">
+                <column name="cellphone" type="VARCHAR(15)"/>
+            </addColumn>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
