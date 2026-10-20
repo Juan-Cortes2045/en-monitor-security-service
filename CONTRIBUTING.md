@@ -19,7 +19,7 @@ That document covers everything you need before your first commit:
 - [ ] One branch = one task (no mixed features)
 - [ ] Commits follow Conventional Commits format
 - [ ] PR is under 400 lines of code (excluding tests) — split it if larger
-- [ ] Architecture rules in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) were followed
+- [ ] Architecture rules in [`docs/Architecture.md`](docs/Architecture.md) were followed
 - [ ] At least 1 reviewer approval obtained
 - [ ] CI checks are green
 
