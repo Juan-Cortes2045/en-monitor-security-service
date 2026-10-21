@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Transactional outbox of the security service.
+
+        Every message other services must receive (account events and mail delivery requests) is
+        written here in the same transaction as the change it announces, and a relay publishes
+        it to the message broker afterwards. A change is therefore never committed without its
+        message, and a message is never sent for a change that rolled back.
+
+        The payload of a mail request carries a verification or recovery code in clear text. It
+        is set to NULL as soon as the broker confirms the message, and a request whose code has
+        expired is discarded unsent, so a code only stays here for the few seconds the relay
+        takes, and never past its validity.
+    -->
+    <changeSet id="security-026-create-security-outbox" author="JuanCortes2045">
+        <comment>Creates the security_outbox table of the transactional outbox.</comment>
+
+        <createTable tableName="security_outbox">
+            <!-- Also the message id on the broker: consumers use it to drop duplicates. -->
+            <column name="id_message" type="VARCHAR(10)">
+                <constraints primaryKey="true" primaryKeyName="pk_security_outbox" nullable="false"/>
+            </column>
+            <!-- Routing key on the broker, for example account.deleted. -->
+            <column name="message_type" type="VARCHAR(60)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="payload" type="TEXT"/>
+            <column name="occurred_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Only set for mail requests: past it, the code inside is useless and the message is discarded. -->
+            <column name="expires_at" type="DATETIME(6)"/>
+            <column name="published_at" type="DATETIME(6)"/>
+            <column name="discarded_at" type="DATETIME(6)"/>
+            <column name="attempts" type="INT" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_error" type="VARCHAR(255)"/>
+        </createTable>
+
+        <!-- The relay reads the pending messages in order. -->
+        <createIndex tableName="security_outbox" indexName="idx_security_outbox_pending">
+            <column name="published_at"/>
+            <column name="discarded_at"/>
+            <column name="occurred_at"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="security_outbox"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
