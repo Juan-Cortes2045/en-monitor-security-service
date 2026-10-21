@@ -17,12 +17,13 @@ The architecture and the migration status are in [`docs/Architecture.md`](docs/A
 ## Tech stack
 
 Java 21, Spring Boot 4.1.1, Spring Security with the OAuth2 resource server (JWT RS256), Spring
-Data JPA, Liquibase, MySQL 8.4 and springdoc-openapi.
+Data JPA, Liquibase, MySQL 8.4, Spring AMQP (RabbitMQ) and springdoc-openapi.
 
 ## Running locally
 
-Requirements: Java 21 and the MySQL of the infra repository running
-(`docker compose up -d mysql` in `infra`).
+Requirements: Java 21, and the MySQL and RabbitMQ of the infra repository running. Without
+RabbitMQ the service still starts, but the account events and mail requests wait in the outbox
+and `/actuator/health` reports DOWN.
 
 1. `cp .env.example .env` and fill in the `CHANGE_ME` values. `SPRING_DATASOURCE_PASSWORD` is the
    `MYSQL_PASSWORD` of `infra/.env`, and `SECURITY_RESET_PEPPER` must be the value the backend
@@ -44,7 +45,12 @@ SPRING_DATASOURCE_PASSWORD=... ./mvnw test
 
 The persistence tests run against the real MySQL of the infra repository, because Liquibase owns
 the schema. Every test runs under the `test` profile (test-only pepper, key pair under
-`~/.energy-monitor/keys`).
+`~/.energy-monitor/keys`). The outbox relay is off in that profile, and the messages the suite
+writes are stored already discarded, so nothing it does is ever published.
+
+`RabbitOutboxPublisherBrokerTest` runs against a real RabbitMQ when one answers on
+`RABBITMQ_HOST:RABBITMQ_PORT` (credentials from `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD`), and
+is skipped otherwise.
 
 ## Docker
 

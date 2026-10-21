@@ -28,8 +28,7 @@ com.energymonitor.security
 │   └── out
 │       ├── persistence     → JPA entities, Spring Data repositories, mappers, adapters
 │       ├── security        → BCrypt, token generation and hashing, Google OAuth client
-│       ├── event           → Account event publisher
-│       └── mail            → Mail delivery requests (see "Migration status")
+│       └── messaging       → Transactional outbox, relay and RabbitMQ publisher
 └── infrastructure          → Spring wiring: filter chain, JWT, CORS, RBAC authorization,
                               executors and configuration properties
 ```
@@ -53,8 +52,8 @@ transaction boundaries are applied there, not inside the use cases.
   repositories and convert between domain models and JPA entities through mappers.
 - **out/security** — password hashing, secure tokens and identifiers, the pepper-based hash of
   recovery codes, the attempt limiter and the Google OAuth client.
-- **out/event** — publishes `AccountRegistered`, `AccountAdministered` and `AccountDeleted`.
-- **out/mail** — hands verification and recovery codes to the mail channel.
+- **out/messaging** — the account events and the mail requests, written to the outbox and
+  relayed to RabbitMQ (see "Messaging").
 
 ### Infrastructure
 
@@ -92,6 +91,33 @@ energy-monitor-backend; the two are never mixed, and the global role grants no a
 - Both services share the `DATABASECHANGELOG` table; each one applies only its own changelogs.
 - A new schema change is always a new changeset with its `rollback`.
 
+## Messaging
+
+Everything other services must hear from this one goes to the topic exchange
+`energy-monitor.security`, with the message type as routing key:
+
+| Routing key | Body (JSON) | Consumer in energy-monitor-backend |
+|---|---|---|
+| `account.registered` | `userId`, `email`, `occurredAt` | notification: in-app notice to the administrators |
+| `account.administered` | `actorId`, `userId`, `action`, `detail`, `occurredAt` | notification: in-app notice to the other administrators |
+| `account.deleted` | `userId`, `deletedAt` | home: drops the memberships and the homes it alone owned |
+| `mail.email-verification` | `userId`, `recipient`, `code`, `validUntil` | notification: mails the code |
+| `mail.password-reset` | `userId`, `recipient`, `idResetToken`, `code`, `validUntil` | notification: mails the code |
+
+- **Transactional outbox.** A message is written to `security_outbox` (changeset
+  `security-026`) in the same transaction as the change it announces, so a change is never
+  committed without its message and a rolled back change never sends one.
+- **Relay.** Every second, `OutboxRelay` publishes the pending messages oldest first. A message
+  counts as published only when RabbitMQ confirms it and a queue took it; the first failure stops
+  the run, so order is kept and the message is retried. Delivery is therefore at least once, and
+  every message carries its id (`message_id`) so consumers drop duplicates.
+- **Codes.** A mail request holds a code in clear text. Its payload is erased as soon as the
+  broker confirms it, it expires with the code (AMQP expiration), and the relay discards it unsent
+  once the code is no longer valid.
+- **Queues.** The consumers declare their own durable queues, each with a dead-letter queue.
+- **Single instance.** The relay assumes one instance of this service; a second one would keep
+  delivery correct but could reorder messages.
+
 ## Boundaries with other services
 
 - No service imports another one's entities, repositories or internal classes. Other domains are
@@ -104,14 +130,12 @@ energy-monitor-backend; the two are never mixed, and the global role grants no a
 | Phase | Content | Status |
 |---|---|---|
 | 1 | Module moved here with its tests and changesets | Done |
-| 2 | RabbitMQ, transactional outbox and events; mail requests over the broker | Pending |
+| 2 | RabbitMQ, transactional outbox and events; mail requests over the broker | Done |
 | 3 | `/internal` endpoints (permissions, profiles, administrators) and the deletion check | Pending |
 | 4 | `security` removed from energy-monitor-backend | Pending |
 | 5 | API gateway | Pending |
 | 6 | Infrastructure, CI/CD and deployment | Pending |
 
-Until phase 2, `UnroutedMailDeliveryAdapter` only logs that a code was not sent (never the code
-itself), and the account events have no listener outside this service.
 
 ## Working principles
 
