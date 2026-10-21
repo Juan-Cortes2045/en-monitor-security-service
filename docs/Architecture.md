@@ -138,8 +138,11 @@ configured every internal call is refused. The reverse proxy never forwards `/in
   and 2 s to read, or any other status, refuses the deletion with 503. Once deleted,
   `account.deleted` tells the backend to clean up.
 - **The backend's side** caches permissions and administrators 30 s and profiles 60 s (Caffeine),
-  and degrades when this service does not answer: the member list shows no names, `/admin/**`
-  answers 503 and a message consumer lets the broker retry.
+  and degrades when this service does not answer: names are left out of the member list and the
+  administrator notifications, alert mail is skipped (push still goes), its `/api/v1/admin/**`
+  routes answer 503 and a message consumer lets the broker retry.
+- **A deletion that slips past the check** (a member joined in between) does not block
+  `account.deleted`: the backend hands the home to its oldest remaining member.
 
 ## Boundaries with other services
 
@@ -155,7 +158,7 @@ configured every internal call is refused. The reverse proxy never forwards `/in
 | 1 | Module moved here with its tests and changesets | Done |
 | 2 | RabbitMQ, transactional outbox and events; mail requests over the broker | Done |
 | 3 | `/internal` endpoints (permissions, profiles, administrators) and the deletion check | Done |
-| 4 | `security` removed from energy-monitor-backend | Pending |
+| 4 | `security` removed from energy-monitor-backend: it validates the tokens with the public key and asks this service the rest | Done |
 | 5 | API gateway | Pending |
 | 6 | Infrastructure, CI/CD and deployment | Pending |
 
