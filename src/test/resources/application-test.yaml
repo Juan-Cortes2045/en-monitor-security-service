@@ -20,6 +20,10 @@ messaging:
   # a service started later on the same database never publishes them either.
   discard-written: true
 
+internal-api:
+  # Test-only token, committed for the same reason as the pepper below.
+  token: test-only-internal-token
+
 management:
   health:
     # No broker is required to run the suite.

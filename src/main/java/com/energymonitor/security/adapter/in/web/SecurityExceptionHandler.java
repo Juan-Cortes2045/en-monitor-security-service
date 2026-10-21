@@ -2,6 +2,7 @@ package com.energymonitor.security.adapter.in.web;
 
 import com.energymonitor.security.adapter.in.web.dto.ApiError;
 import com.energymonitor.security.api.AccountDeletionBlockedException;
+import com.energymonitor.security.application.exception.AccountDeletionCheckUnavailableException;
 import com.energymonitor.security.application.exception.AccountNotActiveException;
 import com.energymonitor.security.application.exception.GoogleSignInUnavailableException;
 import com.energymonitor.security.application.exception.CurrentPasswordMismatchException;
@@ -195,6 +196,21 @@ public class SecurityExceptionHandler {
     public ResponseEntity<ApiError> handleAccountDeletionBlocked(
             AccountDeletionBlockedException exception, HttpServletRequest request) {
         return respond(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    /**
+     * energy-monitor-backend could not say whether the account may be deleted, so it was not.
+     *
+     * @param exception the application failure
+     * @param request   the failed request
+     * @return 503
+     */
+    @ExceptionHandler(AccountDeletionCheckUnavailableException.class)
+    public ResponseEntity<ApiError> handleDeletionCheckUnavailable(
+            AccountDeletionCheckUnavailableException exception, HttpServletRequest request) {
+        LOG.warn("Account deletion refused: {}", exception.getMessage());
+        return respond(HttpStatus.SERVICE_UNAVAILABLE,
+                "Your account cannot be deleted right now. Try again in a few minutes.", request);
     }
 
     @ExceptionHandler(CurrentPasswordMismatchException.class)

@@ -54,6 +54,7 @@ import com.energymonitor.security.application.usecase.ChangePasswordService;
 import com.energymonitor.security.application.usecase.CheckPermissionService;
 import com.energymonitor.security.application.usecase.CreatePasswordResetTokenService;
 import com.energymonitor.security.application.usecase.DeleteAccountService;
+import com.energymonitor.security.application.port.out.AccountDeletionGuardPort;
 import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
 import com.energymonitor.security.application.usecase.EmailVerificationService;
 import com.energymonitor.security.application.usecase.UserProfileQueryService;
@@ -361,19 +362,20 @@ public class SecurityApplicationWiring {
     }
 
     /**
-     * Transactional on purpose: the home module's listener runs inside this transaction, so a
-     * failure there leaves the account undeleted rather than half deleted.
+     * Transactional on purpose: the deletion and its AccountDeleted message in the outbox commit
+     * together, so the other services hear about every deletion and only about real ones.
      */
     @Bean
     public DeleteAccount deleteAccount(UserPersistencePort users, PersonPersistencePort persons,
                                        UserSessionPersistencePort sessions,
                                        PasswordHasherPort hasher, AuditLogPersistencePort audits,
                                        AccountEventPublisherPort events,
+                                       AccountDeletionGuardPort deletionGuard,
                                        IdentifierGeneratorPort identifiers, Clock clock,
                                        PlatformTransactionManager transactions) {
         return transactional(transactions,
                 new DeleteAccountService(users, persons, sessions, hasher, audits, events,
-                        identifiers, clock),
+                        deletionGuard, identifiers, clock),
                 DeleteAccount.class);
     }
 

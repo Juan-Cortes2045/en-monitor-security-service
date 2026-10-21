@@ -5,6 +5,7 @@ import com.energymonitor.security.application.command.DeleteAccountCommand;
 import com.energymonitor.security.application.exception.CurrentPasswordMismatchException;
 import com.energymonitor.security.application.exception.UserNotFoundException;
 import com.energymonitor.security.application.port.in.DeleteAccount;
+import com.energymonitor.security.application.port.out.AccountDeletionGuardPort;
 import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
 import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
@@ -26,6 +27,10 @@ import java.time.Instant;
  * <p>The sessions are closed so no refresh token can mint another access token; the refresh flow
  * also refuses a deleted account on its own. An access token already issued keeps working until it
  * expires, which is at most its fifteen-minute lifetime.
+ *
+ * <p>energy-monitor-backend is asked first whether the account may go (a sole owner of a home with
+ * other members may not), and then hears about the deletion through {@link AccountDeleted} to
+ * remove the memberships and homes of the account.
  */
 public class DeleteAccountService implements DeleteAccount {
 
@@ -35,6 +40,7 @@ public class DeleteAccountService implements DeleteAccount {
     private final PasswordHasherPort passwordHasher;
     private final AuditLogPersistencePort auditLogPort;
     private final AccountEventPublisherPort events;
+    private final AccountDeletionGuardPort deletionGuard;
     private final IdentifierGeneratorPort identifiers;
     private final Clock clock;
 
@@ -43,6 +49,7 @@ public class DeleteAccountService implements DeleteAccount {
                                 PasswordHasherPort passwordHasher,
                                 AuditLogPersistencePort auditLogPort,
                                 AccountEventPublisherPort events,
+                                AccountDeletionGuardPort deletionGuard,
                                 IdentifierGeneratorPort identifiers, Clock clock) {
         this.userPort = userPort;
         this.personPort = personPort;
@@ -50,6 +57,7 @@ public class DeleteAccountService implements DeleteAccount {
         this.passwordHasher = passwordHasher;
         this.auditLogPort = auditLogPort;
         this.events = events;
+        this.deletionGuard = deletionGuard;
         this.identifiers = identifiers;
         this.clock = clock;
     }
@@ -62,6 +70,9 @@ public class DeleteAccountService implements DeleteAccount {
         if (!passwordHasher.matches(command.password(), user.passwordHash())) {
             throw new CurrentPasswordMismatchException("current password does not match");
         }
+        // Asked before anything changes: the other services clean up after the AccountDeleted
+        // event, too late to refuse, so a refusal has to come now.
+        deletionGuard.ensureDeletable(user.idUser());
 
         sessionPort.listActiveByUser(user.idUser()).forEach(session -> {
             session.close(now);
