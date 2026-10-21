@@ -10,6 +10,22 @@ spring:
     username: ${SPRING_DATASOURCE_USERNAME:energy_app}
     password: ${SPRING_DATASOURCE_PASSWORD:}
 
+messaging:
+  # The suite writes to the shared database, and its outbox rows must not reach a broker that a
+  # running energy-monitor-backend is consuming: it would mail codes to test addresses. The relay
+  # itself is covered by OutboxRelayTest and, against a real broker, by
+  # RabbitOutboxPublisherBrokerTest.
+  relay-enabled: false
+  # And the rows stay behind in the shared database after the suite: stored already discarded,
+  # a service started later on the same database never publishes them either.
+  discard-written: true
+
+management:
+  health:
+    # No broker is required to run the suite.
+    rabbit:
+      enabled: false
+
 security:
   reset:
     # Test-only pepper: committed on purpose, because it protects nothing outside the test profile
