@@ -37,6 +37,11 @@ energy-monitor-backend on 8080. Health: `/actuator/health`; Swagger UI: `/swagge
 
 It does not start without the RSA key pair or the pepper.
 
+`INTERNAL_API_TOKEN` must be the value of energy-monitor-backend: it protects the internal calls
+between both (see [docs/Architecture.md](docs/Architecture.md#internal-api)). Without it the
+backend cannot ask for permissions or profiles, and deleting an account answers 503 because the
+backend refuses the deletion check (`BACKEND_INTERNAL_URL`).
+
 ## Tests
 
 ```bash
