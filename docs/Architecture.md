@@ -118,6 +118,29 @@ Everything other services must hear from this one goes to the topic exchange
 - **Single instance.** The relay assumes one instance of this service; a second one would keep
   delivery correct but could reorder messages.
 
+## Internal API
+
+What energy-monitor-backend asks this service while it serves its own requests, and what this
+service asks it back. Neither side presents a JWT: a call is trusted only when it comes from
+`internal-api.allowed-networks` **and** carries `internal-api.token` (`INTERNAL_API_TOKEN`, the
+same in both services) in `X-Internal-Token`, compared in constant time. Without a token
+configured every internal call is refused. The reverse proxy never forwards `/internal/**`.
+
+| Direction | Route | Answer |
+|---|---|---|
+| backend → security | `GET /internal/users/{id}/permissions` | `{permissions: [...]}`; 404 without an active account |
+| backend → security | `POST /internal/users/profiles` `{userIds}` (≤ 500) | `{profiles: [{userId, name, lastName, email}]}`, active accounts only |
+| backend → security | `GET /internal/administrators` | `{userIds: [...]}` |
+| security → backend | `GET /internal/accounts/{id}/deletion-check` | 204 may delete; 409 `{message}` refused |
+
+- **Deleting an account.** The use case asks the deletion check after verifying the password and
+  before changing anything. A 409 is returned to the user as is; no answer within 1 s to connect
+  and 2 s to read, or any other status, refuses the deletion with 503. Once deleted,
+  `account.deleted` tells the backend to clean up.
+- **The backend's side** caches permissions and administrators 30 s and profiles 60 s (Caffeine),
+  and degrades when this service does not answer: the member list shows no names, `/admin/**`
+  answers 503 and a message consumer lets the broker retry.
+
 ## Boundaries with other services
 
 - No service imports another one's entities, repositories or internal classes. Other domains are
@@ -131,7 +154,7 @@ Everything other services must hear from this one goes to the topic exchange
 |---|---|---|
 | 1 | Module moved here with its tests and changesets | Done |
 | 2 | RabbitMQ, transactional outbox and events; mail requests over the broker | Done |
-| 3 | `/internal` endpoints (permissions, profiles, administrators) and the deletion check | Pending |
+| 3 | `/internal` endpoints (permissions, profiles, administrators) and the deletion check | Done |
 | 4 | `security` removed from energy-monitor-backend | Pending |
 | 5 | API gateway | Pending |
 | 6 | Infrastructure, CI/CD and deployment | Pending |

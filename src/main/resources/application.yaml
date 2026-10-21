@@ -48,6 +48,19 @@ messaging:
   batch-size: 50
   confirm-timeout: PT5S
 
+# Calls between this service and energy-monitor-backend, both ways. Each side checks the other's
+# network and the shared token; the reverse proxy never forwards /internal/**.
+internal-api:
+  # Same value in both services. Empty refuses every inbound internal call.
+  # Generate with: openssl rand -hex 32
+  token: ${INTERNAL_API_TOKEN:}
+  allowed-networks: ${INTERNAL_API_ALLOWED_NETWORKS:127.0.0.1/32,::1/128,172.16.0.0/12}
+  # Asked before deleting an account (GET /internal/accounts/{id}/deletion-check). No answer
+  # within the timeouts refuses the deletion with 503.
+  backend-url: ${BACKEND_INTERNAL_URL:http://localhost:8080}
+  connect-timeout: PT1S
+  read-timeout: PT2S
+
 security:
   google:
     # OAuth client of type "Web application" (Google Cloud Console). Both empty = the

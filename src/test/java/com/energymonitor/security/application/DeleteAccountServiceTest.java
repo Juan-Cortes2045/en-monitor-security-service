@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.energymonitor.security.api.AccountDeleted;
+import com.energymonitor.security.api.AccountDeletionBlockedException;
 import com.energymonitor.security.application.command.DeleteAccountCommand;
+import com.energymonitor.security.application.exception.AccountDeletionCheckUnavailableException;
 import com.energymonitor.security.application.exception.CurrentPasswordMismatchException;
 import com.energymonitor.security.application.usecase.DeleteAccountService;
 import com.energymonitor.security.domain.model.AuditAction;
@@ -33,8 +35,16 @@ class DeleteAccountServiceTest {
     private final UseCaseFixtures.FakeAccountEventPublisherPort events =
             new UseCaseFixtures.FakeAccountEventPublisherPort();
 
+    /** What the backend answers; null lets the deletion go ahead. */
+    private RuntimeException refusal;
+
     private final DeleteAccountService service = new DeleteAccountService(users, persons, sessions,
             new UseCaseFixtures.FakePasswordHasherPort(), audits, events,
+            idUser -> {
+                if (refusal != null) {
+                    throw refusal;
+                }
+            },
             new UseCaseFixtures.FakeIdentifierGeneratorPort(), Clock.fixed(NOW, ZoneOffset.UTC));
 
     @BeforeEach
@@ -68,6 +78,38 @@ class DeleteAccountServiceTest {
         assertThat(users.findActive("use0000001")).isPresent();
         assertThat(persons.findActive("per0000001")).isPresent();
         assertThat(sessions.findActive("ses0000001").orElseThrow().closedAt()).isEmpty();
+        assertThat(events.events()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a refusal of the backend deletes nothing and announces nothing")
+    void refusedDeletionDeletesNothing() {
+        refusal = new AccountDeletionBlockedException("only owner");
+
+        assertThatThrownBy(() -> service.delete(
+                new DeleteAccountCommand("use0000001", UseCaseFixtures.PASSWORD, "10.0.0.1")))
+                .isSameAs(refusal);
+
+        assertNothingDeleted();
+    }
+
+    @Test
+    @DisplayName("without an answer from the backend nothing is deleted")
+    void uncheckedDeletionDeletesNothing() {
+        refusal = new AccountDeletionCheckUnavailableException("timeout");
+
+        assertThatThrownBy(() -> service.delete(
+                new DeleteAccountCommand("use0000001", UseCaseFixtures.PASSWORD, "10.0.0.1")))
+                .isSameAs(refusal);
+
+        assertNothingDeleted();
+    }
+
+    private void assertNothingDeleted() {
+        assertThat(users.findActive("use0000001")).isPresent();
+        assertThat(persons.findActive("per0000001")).isPresent();
+        assertThat(sessions.findActive("ses0000001").orElseThrow().closedAt()).isEmpty();
+        assertThat(audits.logs()).isEmpty();
         assertThat(events.events()).isEmpty();
     }
 }
