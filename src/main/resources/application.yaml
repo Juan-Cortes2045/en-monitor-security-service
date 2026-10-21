@@ -21,9 +21,32 @@ spring:
     # and so is the DATABASECHANGELOG table: each service applies its own changelogs.
     change-log: classpath:db/changelog/db.changelog-master.xml
 
+  # Message broker of the account events and the mail requests (RabbitMQ, from infra).
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:energy-monitor}
+    password: ${RABBITMQ_PASSWORD:}
+    # A message is marked as published only after the broker confirms it and a queue took it.
+    publisher-confirm-type: simple
+    publisher-returns: true
+    template:
+      mandatory: true
+
 server:
   # 8080 stays with energy-monitor-backend when both run on the same machine.
   port: ${SERVER_PORT:8082}
+
+messaging:
+  # Topic exchange of everything this service announces; the routing keys are the message types
+  # (account.registered, account.administered, account.deleted, mail.email-verification,
+  # mail.password-reset).
+  exchange: energy-monitor.security
+  # The outbox relay: every second, up to 50 messages, each confirmed by the broker within 5 s.
+  relay-enabled: true
+  poll-interval: PT1S
+  batch-size: 50
+  confirm-timeout: PT5S
 
 security:
   google:
