@@ -1,0 +1,44 @@
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/energy_monitor?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+    # No credential is written here. A password committed to this file belongs to whichever
+    # machine created it and breaks every other one with "Access denied", so the tests read it
+    # from the environment instead:
+    #   SPRING_DATASOURCE_USERNAME=energy_app SPRING_DATASOURCE_PASSWORD=... ./mvnw test
+    # The username keeps a default because it is not a secret; the password deliberately has
+    # none, so a missing variable fails loudly instead of connecting as nobody expects.
+    username: ${SPRING_DATASOURCE_USERNAME:energy_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+
+messaging:
+  # The suite writes to the shared database, and its outbox rows must not reach a broker that a
+  # running energy-monitor-backend is consuming: it would mail codes to test addresses. The relay
+  # itself is covered by OutboxRelayTest and, against a real broker, by
+  # RabbitOutboxPublisherBrokerTest.
+  relay-enabled: false
+  # And the rows stay behind in the shared database after the suite: stored already discarded,
+  # a service started later on the same database never publishes them either.
+  discard-written: true
+
+internal-api:
+  # Test-only token, committed for the same reason as the pepper below.
+  token: test-only-internal-token
+
+management:
+  health:
+    # No broker is required to run the suite.
+    rabbit:
+      enabled: false
+
+security:
+  reset:
+    # Test-only pepper: committed on purpose, because it protects nothing outside the test profile
+    # and has to be the same value on every machine for the suite to behave identically. Local and
+    # production still require the real one through SECURITY_RESET_PEPPER.
+    pepper: test-only-pepper-0123456789abcdef0123
+
+  jwt:
+    # The JWT beans need an RSA pair on disk. Each machine generates its own once
+    # (see application-local.yaml.example); the environment variables win when set.
+    private-key-path: ${SECURITY_JWT_PRIVATE_KEY_PATH:${user.home}/.energy-monitor/keys/private.pem}
+    public-key-path: ${SECURITY_JWT_PUBLIC_KEY_PATH:${user.home}/.energy-monitor/keys/public.pem}

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        The client downsizes the avatar to 256 px and sends it as a data URL, which is 15 to 30 KB
+        of text and does not fit in VARCHAR(255). MEDIUMTEXT holds up to 16 MB; the application
+        caps it far below that (User.PROFILE_IMAGE_MAX).
+    -->
+    <changeSet id="security-022-widen-user-profile-image" author="JuanCortes2045">
+        <comment>Profile image on user becomes MEDIUMTEXT so a data URL fits.</comment>
+        <modifyDataType tableName="user" columnName="profile_image" newDataType="MEDIUMTEXT"/>
+
+        <rollback>
+            <modifyDataType tableName="user" columnName="profile_image" newDataType="VARCHAR(255)"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

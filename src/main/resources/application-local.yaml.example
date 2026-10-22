@@ -1,0 +1,38 @@
+# Local profile: copy to application-local.yaml (gitignored) and set the database password.
+#
+# Only what differs per machine lives here; the rest is read from .env (see .env.example).
+
+spring:
+  datasource:
+    # The schema shared with energy-monitor-backend (MySQL from the infra repository).
+    url: jdbc:mysql://localhost:3306/energy_monitor?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+    username: energy_app
+    password: "CHANGE_ME"
+
+security:
+  jwt:
+    issuer: https://energy-monitor-backend
+    access-token-ttl: 15m
+    # This service holds the private key: it is the only one that signs tokens. The other services
+    # only need the public key to validate them.
+    #   openssl genpkey -algorithm RSA -out ~/.energy-monitor/keys/private.pem -pkeyopt rsa_keygen_bits:2048
+    #   openssl rsa -in ~/.energy-monitor/keys/private.pem -pubout -out ~/.energy-monitor/keys/public.pem
+    #
+    # The path must be absolute. Java does not expand ~ , so "~/.energy-monitor/keys/private.pem"
+    # is taken literally and the key is reported as unreadable.
+    private-key-path: ${SECURITY_JWT_PRIVATE_KEY_PATH:}
+    public-key-path: ${SECURITY_JWT_PUBLIC_KEY_PATH:}
+
+  reset:
+    # Pepper for the password-recovery code. Empty on purpose: the application then refuses to
+    # start with a message naming the variable, which beats silently protecting nothing.
+    #   openssl rand -hex 32
+    pepper: ${SECURITY_RESET_PEPPER:}
+    code-digits: 6
+    code-validity: 15m
+    max-attempts-per-window: 10
+    attempt-window: 15m
+
+  cors:
+    allowed-origins: "http://localhost:5173,http://127.0.0.1:5173"
+    allow-credentials: false

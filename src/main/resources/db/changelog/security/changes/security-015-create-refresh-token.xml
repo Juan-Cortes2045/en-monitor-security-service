@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        One row per refresh token generation. A session is a login; a row here is one secret
+        handed out under that login. Rotating mints a new row and retires the previous one,
+        never overwrites it, because the retired row is what makes replay detectable.
+
+        Lineage is carried by two columns rather than a token_family table: family_id names
+        the root of the chain, and parent_id names the generation this one replaced. A replay
+        of any ancestor is therefore a lookup by family_id, and revoking a family is an update
+        over the rows sharing that value.
+
+        Only the SHA-256 hash of the secret is stored. The raw token exists for the duration of
+        the login or refresh that mints it and is never persisted, so a database disclosure
+        does not hand over usable sessions.
+    -->
+    <changeSet id="security-015-create-refresh-token" author="JuanCortes2045">
+        <comment>Refresh token generations with family lineage. Stores only the SHA-256 hash, never the secret.</comment>
+        <createTable tableName="refresh_token">
+            <column name="id_refresh_token" type="VARCHAR(10)">
+                <constraints primaryKey="true" primaryKeyName="pk_refresh_token" nullable="false"/>
+            </column>
+            <column name="id_user_session" type="VARCHAR(10)">
+                <constraints nullable="false"
+                             foreignKeyName="fk_refresh_token_user_session"
+                             references="user_session(id_user_session)"/>
+            </column>
+            <!-- The root generation of the chain; shared by every row descended from it. -->
+            <column name="family_id" type="VARCHAR(10)">
+                <constraints nullable="false"/>
+            </column>
+            <!-- The generation this one replaced. NULL on the root. -->
+            <column name="parent_id" type="VARCHAR(10)">
+                <constraints foreignKeyName="fk_refresh_token_parent_id"
+                             references="refresh_token(id_refresh_token)"/>
+            </column>
+            <!-- Lowercase hex SHA-256: 32 bytes rendered as 64 characters. -->
+            <column name="token_hash" type="VARCHAR(64)">
+                <constraints nullable="false" unique="true"
+                             uniqueConstraintName="uk_refresh_token_hash"/>
+            </column>
+            <column name="status"
+                    type="ENUM('ACTIVE', 'ROTATED', 'REVOKED', 'EXPIRED')">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="expires_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Lifecycle stamps: set by the domain as the generation advances, nullable while absent. -->
+            <column name="rotated_at" type="TIMESTAMP"/>
+            <column name="revoked_at" type="TIMESTAMP"/>
+            <column name="revoked_reason"
+                    type="ENUM('REFRESH_TOKEN_REUSE', 'PASSWORD_CHANGED', 'ADMINISTRATIVE')"/>
+            <column name="updated_at" type="TIMESTAMP"
+                    defaultValueComputed="CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="deleted_at" type="TIMESTAMP"/>
+        </createTable>
+
+        <!-- Revoking a family is a predicate on this column, so it has to be indexed. -->
+        <createIndex tableName="refresh_token" indexName="ix_refresh_token_family_id">
+            <column name="family_id"/>
+        </createIndex>
+        <createIndex tableName="refresh_token" indexName="ix_refresh_token_user_session">
+            <column name="id_user_session"/>
+        </createIndex>
+
+        <rollback>
+            <dropIndex tableName="refresh_token" indexName="ix_refresh_token_user_session"/>
+            <dropIndex tableName="refresh_token" indexName="ix_refresh_token_family_id"/>
+            <dropTable tableName="refresh_token"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
