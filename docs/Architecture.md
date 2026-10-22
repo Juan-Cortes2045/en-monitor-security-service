@@ -124,7 +124,7 @@ What energy-monitor-backend asks this service while it serves its own requests, 
 service asks it back. Neither side presents a JWT: a call is trusted only when it comes from
 `internal-api.allowed-networks` **and** carries `internal-api.token` (`INTERNAL_API_TOKEN`, the
 same in both services) in `X-Internal-Token`, compared in constant time. Without a token
-configured every internal call is refused. The reverse proxy never forwards `/internal/**`.
+configured every internal call is refused. The API gateway never forwards `/internal/**`.
 
 | Direction | Route | Answer |
 |---|---|---|
@@ -150,6 +150,8 @@ configured every internal call is refused. The reverse proxy never forwards `/in
   referenced by identifier only.
 - Communication goes through the contracts in `api`: queries over internal REST endpoints and
   state changes as events over the message broker (see "Migration status").
+- The clients reach the services only through the API gateway, which validates the token before
+  forwarding; each service validates it again and decides the permissions itself.
 
 ## Migration status
 
@@ -159,7 +161,7 @@ configured every internal call is refused. The reverse proxy never forwards `/in
 | 2 | RabbitMQ, transactional outbox and events; mail requests over the broker | Done |
 | 3 | `/internal` endpoints (permissions, profiles, administrators) and the deletion check | Done |
 | 4 | `security` removed from energy-monitor-backend: it validates the tokens with the public key and asks this service the rest | Done |
-| 5 | API gateway | Pending |
+| 5 | API gateway (`en-monitor-api-gateway`, :8080): routes, CORS, token check and rate limit in front of both services; energy-monitor-backend moves to :8083 | Done |
 | 6 | Infrastructure, CI/CD and deployment | Pending |
 
 
