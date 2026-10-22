@@ -21,7 +21,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record InternalApiProperties(
         String token,
         @DefaultValue({"127.0.0.1/32", "::1/128", "172.16.0.0/12"}) List<String> allowedNetworks,
-        @DefaultValue("http://localhost:8080") URI backendUrl,
+        @DefaultValue("http://localhost:8083") URI backendUrl,
         @DefaultValue("PT1S") Duration connectTimeout,
         @DefaultValue("PT2S") Duration readTimeout) {
 

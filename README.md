@@ -32,8 +32,8 @@ and `/actuator/health` reports DOWN.
    and set the database password and the paths of the RSA key pair (see "RSA key pair").
 3. `./mvnw spring-boot:run`
 
-The service answers on `http://localhost:8082` (`SERVER_PORT`), so it can run next to
-energy-monitor-backend on 8080. Health: `/actuator/health`; Swagger UI: `/swagger-ui.html`.
+The service answers on `http://localhost:8082` (`SERVER_PORT`), next to the API gateway on 8080
+and energy-monitor-backend on 8083. The web and mobile apps call the gateway, not this port. Health: `/actuator/health`; Swagger UI: `/swagger-ui.html`.
 
 It does not start without the RSA key pair or the pepper.
 
@@ -202,31 +202,24 @@ Setup (once per environment):
    same client ID in the web app's `.env.local` (`VITE_GOOGLE_CLIENT_ID`); restart both. Both
    empty = the Google button answers `503`.
 
-## Running behind a reverse proxy
+## Running behind the API gateway
 
-The application records `request.getRemoteAddr()` as the caller's address and
-**ignores `X-Forwarded-For`**. A header the client sets is not evidence of
-anything: the password-recovery attempt limiter is keyed on that address, so a
-per-request header would hand out a fresh allowance every time and defeat it.
+The clients reach this service through the API gateway (`../en-monitor-api-gateway`, `:8080`),
+which forwards `/api/v1/auth/**` and `/api/v1/admin/users|roles/**` here after checking the token
+and answering CORS. It drops the `Origin` header, so this service never answers CORS itself, and it
+never forwards `/internal/**`.
 
-The cost of that choice is that behind a proxy every request looks like it comes
-from the proxy, and the recovery rate limit therefore becomes one limit shared by
-all users. A deployment in that position must configure the container's trusted
-proxy handling, in the profile of that deployment rather than in `application.yaml`:
+The application records `request.getRemoteAddr()` as the caller's address; the password-recovery
+attempt limiter and the audit trail are keyed on it. Behind the gateway that would be the
+gateway's address for everyone, and the recovery limit would become one limit shared by all users.
+So `application.yaml` sets `server.forward-headers-strategy: native`, and
+`server.tomcat.remoteip.internal-proxies` to loopback and `172.16.0.0/12` only.
 
-```properties
-server.forward-headers-strategy=native
-```
-
-Tomcat's `RemoteIpValve` then validates the header against the internal proxies
-it knows about and rewrites `getRemoteAddr()` with the real client address. Do
-this in the container rather than in application code: the decision about which
-peers may set the header belongs to the deployment's configuration, because only
-the deployment knows who sits in front of it.
-
-While that is not configured, expect two visible effects: every audit row shows
-the proxy's address, and a burst of recovery attempts from unrelated users counts
-against a single allowance.
+Tomcat's `RemoteIpValve` then takes the caller's address from `X-Forwarded-For`, which the gateway
+appends, but **only when the connection comes from loopback or a Docker network**. The default list
+would also trust 10.x and 192.168.x, and a machine of the LAN could then pass as `127.0.0.1` and
+get through the network check of `/internal/**` (it would still need the token). A client that
+connects directly from anywhere else is recorded by its own address, whatever header it sends.
 
 ## Tests
 

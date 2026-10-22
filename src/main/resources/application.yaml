@@ -34,8 +34,18 @@ spring:
       mandatory: true
 
 server:
-  # 8080 stays with energy-monitor-backend when both run on the same machine.
+  # 8080 is the API gateway and 8083 energy-monitor-backend when all run on the same machine.
   port: ${SERVER_PORT:8082}
+  # Requests come through the API gateway: from it (loopback or a private network) the container
+  # takes the caller's address from X-Forwarded-For, which the audit trail and the recovery
+  # attempt limit record.
+  forward-headers-strategy: native
+  tomcat:
+    # Only loopback (the gateway or nginx on this machine) and the Docker networks may set it: the
+    # default would trust every private network, and a machine of the LAN could then pass as
+    # 127.0.0.1.
+    remoteip:
+      internal-proxies: "127\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}|0:0:0:0:0:0:0:1|::1|172\\.(1[6-9]|2[0-9]|3[0-1])\\.\\d{1,3}\\.\\d{1,3}"
 
 messaging:
   # Topic exchange of everything this service announces; the routing keys are the message types
@@ -57,7 +67,7 @@ internal-api:
   allowed-networks: ${INTERNAL_API_ALLOWED_NETWORKS:127.0.0.1/32,::1/128,172.16.0.0/12}
   # Asked before deleting an account (GET /internal/accounts/{id}/deletion-check). No answer
   # within the timeouts refuses the deletion with 503.
-  backend-url: ${BACKEND_INTERNAL_URL:http://localhost:8080}
+  backend-url: ${BACKEND_INTERNAL_URL:http://localhost:8083}
   connect-timeout: PT1S
   read-timeout: PT2S
 
