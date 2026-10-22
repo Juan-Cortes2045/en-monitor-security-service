@@ -242,7 +242,15 @@ is skipped otherwise.
 docker build -t energy-monitor-security .
 ```
 
-The infra repository orchestrates the image together with the rest of the platform.
+The infra repository builds the image and runs it next to MySQL, RabbitMQ, energy-monitor-backend
+and the API gateway (`infra/docker-compose.yml` on one machine, `infra/docker-compose.prod.yml` on
+a server). It listens on 8082 inside the Docker network only, runs as `BACKEND_UID:BACKEND_GID` of
+`infra/.env` so it can read `private.pem`, and its container health is `/actuator/health` (database
+and broker included).
+
+`.github/workflows/ci-cd.yml` runs the suite against a MySQL of the runner on every pull request
+and push to `dev` and `main`, and after a push to `main` (and the approval of the `production`
+environment) deploys it with `infra/deploy/deploy.sh security`.
 
 ## Working conventions
 

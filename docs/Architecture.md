@@ -162,7 +162,7 @@ configured every internal call is refused. The API gateway never forwards `/inte
 | 3 | `/internal` endpoints (permissions, profiles, administrators) and the deletion check | Done |
 | 4 | `security` removed from energy-monitor-backend: it validates the tokens with the public key and asks this service the rest | Done |
 | 5 | API gateway (`en-monitor-api-gateway`, :8080): routes, CORS, token check and rate limit in front of both services; energy-monitor-backend moves to :8083 | Done |
-| 6 | Infrastructure, CI/CD and deployment | Pending |
+| 6 | Infrastructure, CI/CD and deployment: RabbitMQ, this service and the gateway in the infra compose files, the web nginx in front of the gateway, CI/CD workflows and `deploy.sh` for both | Done |
 
 
 ## Working principles
