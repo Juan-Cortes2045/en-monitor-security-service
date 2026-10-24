@@ -11,6 +11,7 @@ import com.energymonitor.security.application.result.AuthenticationResult;
 import com.energymonitor.security.application.result.AuthenticationStatus;
 import com.energymonitor.security.application.usecase.AuthenticateUserService;
 import com.energymonitor.security.domain.model.AuditAction;
+import com.energymonitor.security.domain.model.Email;
 import com.energymonitor.security.domain.model.LoginErrorType;
 import com.energymonitor.security.domain.model.UserStatus;
 import java.time.Clock;
@@ -117,5 +118,31 @@ class AuthenticateUserServiceTest {
         assertEquals(LoginErrorType.ACCOUNT_INACTIVE, errors.errors().getFirst().errorType());
         assertEquals(0, users.findActive("use0000001").orElseThrow().failedLoginAttempts());
         assertTrue(audits.logs().isEmpty());
+    }
+
+    @Test
+    void unverifiedAddressGetsNoSessionEvenWithTheRightPassword() {
+        users.seed("use0000001", "per0000001", "ada@example.com", UserStatus.ACTIVE)
+                .changeEmail(Email.of("ada@example.com")); // same address, not verified yet
+
+        AuthenticationResult result = authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
+
+        assertEquals(AuthenticationStatus.EMAIL_NOT_VERIFIED, result.status());
+        assertTrue(result.user().isEmpty());
+        assertEquals(LoginErrorType.EMAIL_NOT_VERIFIED, errors.errors().getFirst().errorType());
+        assertEquals(0, users.findActive("use0000001").orElseThrow().failedLoginAttempts());
+        assertTrue(users.findActive("use0000001").orElseThrow().lastLoginAt().isEmpty());
+        assertTrue(audits.logs().isEmpty());
+    }
+
+    @Test
+    void aWrongPasswordOnAnUnverifiedAccountRevealsNothingAboutVerification() {
+        users.seed("use0000001", "per0000001", "ada@example.com", UserStatus.ACTIVE)
+                .changeEmail(Email.of("ada@example.com"));
+
+        AuthenticationResult result = authenticate.authenticate(attempt("ada@example.com", "otra-cosa"));
+
+        assertEquals(AuthenticationStatus.INVALID_CREDENTIALS, result.status());
+        assertEquals(LoginErrorType.INVALID_PASSWORD, errors.errors().getFirst().errorType());
     }
 }

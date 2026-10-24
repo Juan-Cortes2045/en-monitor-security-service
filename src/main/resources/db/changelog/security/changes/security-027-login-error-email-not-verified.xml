@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        A sign-in with the right password on an account that has not verified its email address is
+        refused and recorded as EMAIL_NOT_VERIFIED in the login error trail.
+
+        Plain SQL rather than modifyDataType: on MySQL that becomes a MODIFY without NOT NULL and the
+        column would silently start accepting nulls.
+    -->
+    <changeSet id="security-027-login-error-email-not-verified" author="JuanCortes2045">
+        <comment>Adds EMAIL_NOT_VERIFIED to login_error_log.error_type.</comment>
+        <sql>
+            ALTER TABLE login_error_log MODIFY error_type
+                ENUM('INVALID_PASSWORD', 'USER_NOT_FOUND', 'ACCOUNT_BLOCKED', 'ACCOUNT_INACTIVE',
+                     'EMAIL_NOT_VERIFIED') NOT NULL
+        </sql>
+        <rollback>
+            <sql>
+                DELETE FROM login_error_log WHERE error_type = 'EMAIL_NOT_VERIFIED';
+                ALTER TABLE login_error_log MODIFY error_type
+                    ENUM('INVALID_PASSWORD', 'USER_NOT_FOUND', 'ACCOUNT_BLOCKED', 'ACCOUNT_INACTIVE') NOT NULL
+            </sql>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
