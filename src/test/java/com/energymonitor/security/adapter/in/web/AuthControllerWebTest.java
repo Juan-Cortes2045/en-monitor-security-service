@@ -361,13 +361,27 @@ class AuthControllerWebTest extends JwtKeyedTest {
                 .andExpect(status().isUnprocessableEntity());
     }
 
+    @Test
+    void answersBadRequestWhenTheEmailDomainCannotReceiveMail() throws Exception {
+        willThrow(new com.energymonitor.security.application.exception.UndeliverableEmailException(
+                "The domain of the email address does not exist or cannot receive mail."))
+                .given(registerUser).register(any());
+
+        mvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationBody()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(
+                        "The domain of the email address does not exist or cannot receive mail."));
+    }
+
     // ----------------------------------------------------------------------- login
 
     @Test
     void signsInWithGoogleWithoutAnAccessToken() throws Exception {
         given(loginFlow.loginWithGoogle(any(), any(), any()))
                 .willReturn(Optional.of(new SecurityLoginFlow.LoginOutcome("access-token",
-                        "refresh-token", 900L, identity())));
+                        "refresh-token", 900L, identity(), "SES0000001")));
 
         mvc.perform(post("/api/v1/auth/google")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -410,10 +424,24 @@ class AuthControllerWebTest extends JwtKeyedTest {
     }
 
     @Test
+    void refusesToSignInUntilTheAddressIsVerified() throws Exception {
+        given(loginFlow.login(any(), any(), any(), any()))
+                .willThrow(new com.energymonitor.security.application.exception.EmailNotVerifiedException("not verified"));
+
+        mvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"ada@example.com\",\"password\":\"StrongPass1!\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.message").value("Verify your email address to sign in."))
+                .andExpect(jsonPath("$.accessToken").doesNotExist());
+    }
+
+    @Test
     void logsInAndAnswersTheTokensAndTheAccount() throws Exception {
         given(loginFlow.login(any(), any(), any(), any()))
                 .willReturn(Optional.of(new SecurityLoginFlow.LoginOutcome("access-token",
-                        "refresh-token", 900L, identity())));
+                        "refresh-token", 900L, identity(), "SES0000001")));
 
         mvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -433,7 +461,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
     void neverExposesTheHashInsideTheLoginAccount() throws Exception {
         given(loginFlow.login(any(), any(), any(), any()))
                 .willReturn(Optional.of(new SecurityLoginFlow.LoginOutcome("access-token",
-                        "refresh-token", 900L, identity())));
+                        "refresh-token", 900L, identity(), "SES0000001")));
 
         String body = mvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -477,6 +505,8 @@ class AuthControllerWebTest extends JwtKeyedTest {
 
     @Test
     void answersAnEmptyAcceptedForAKnownAccount() throws Exception {
+        given(findUser.findByEmail("someone@example.com")).willReturn(Optional.of(newAccount()));
+
         mvc.perform(post("/api/v1/auth/password/forgot")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"someone@example.com\"}"))
@@ -485,15 +515,16 @@ class AuthControllerWebTest extends JwtKeyedTest {
     }
 
     @Test
-    void answersIdenticallyForAnUnknownAccountSoAddressesCannotBeEnumerated() throws Exception {
-        willThrow(new UserNotFoundException("User not found"))
-                .given(createPasswordResetToken).create(any());
+    void tellsTheCallerWhenNoAccountUsesTheAddress() throws Exception {
+        given(findUser.findByEmail("nobody@example.com")).willReturn(Optional.empty());
 
         mvc.perform(post("/api/v1/auth/password/forgot")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"nobody@example.com\"}"))
-                .andExpect(status().isAccepted())
-                .andExpect(content().string(""));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("No account is registered with that email address."));
+
+        verify(createPasswordResetToken, never()).create(any());
     }
 
     @Test
@@ -505,6 +536,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
                 .willReturn(com.energymonitor.security.domain.model.PasswordResetToken.issue(
                         "rst0000001", "USR0000001", "the-secret-reset-token-value",
                         "0".repeat(64), now, now.plusSeconds(900)));
+        given(findUser.findByEmail("someone@example.com")).willReturn(Optional.of(newAccount()));
 
         String body = mvc.perform(post("/api/v1/auth/password/forgot")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -706,6 +738,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
 
     @Test
     void protectsEveryOtherRouteByDefault() throws Exception {
+        given(findUser.findByEmail("nobody@example.com")).willReturn(Optional.of(newAccount()));
         mvc.perform(post("/api/v1/auth/password/forgot")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"nobody@example.com\"}"))

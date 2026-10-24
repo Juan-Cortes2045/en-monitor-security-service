@@ -47,6 +47,7 @@ import com.energymonitor.security.domain.model.Person;
 import com.energymonitor.security.infrastructure.JwtTokenIssuer;
 import com.energymonitor.security.infrastructure.SecurityLoginFlow;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -143,6 +144,7 @@ public class AuthController {
     private final EmailVerification emailVerification;
     private final UserProfileQuery userProfiles;
     private final DeleteAccount deleteAccount;
+    private final SessionCookies sessionCookies;
 
     public AuthController(RegisterUser registerUser, SecurityLoginFlow loginFlow,
                           LogoutUserSession logoutUserSession, RefreshSession refreshSession,
@@ -154,7 +156,8 @@ public class AuthController {
                           FindUser findUser, CheckPermission checkPermission,
                           UpdateUserProfile updateUserProfile,
                           EmailVerification emailVerification,
-                          UserProfileQuery userProfiles, DeleteAccount deleteAccount) {
+                          UserProfileQuery userProfiles, DeleteAccount deleteAccount,
+                          SessionCookies sessionCookies) {
         this.registerUser = registerUser;
         this.loginFlow = loginFlow;
         this.logoutUserSession = logoutUserSession;
@@ -171,6 +174,7 @@ public class AuthController {
         this.emailVerification = emailVerification;
         this.userProfiles = userProfiles;
         this.deleteAccount = deleteAccount;
+        this.sessionCookies = sessionCookies;
     }
 
     /**
@@ -199,7 +203,8 @@ public class AuthController {
                                       "profileImage": null
                                     }"""))),
             @ApiResponse(responseCode = "400", description = "Validation error: the body is "
-                    + "missing a field or an email is malformed",
+                    + "missing a field, the email is malformed, or its domain does not exist or "
+                    + "cannot receive mail (no MX nor address record)",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class))),
             @ApiResponse(responseCode = "409", description = "An account already exists for "
@@ -304,7 +309,9 @@ public class AuthController {
                     + "token together with an opaque refresh token. Every rejection produces "
                     + "the same 401 with the same body on purpose: telling the caller whether "
                     + "the address is unknown or the password wrong would turn this endpoint "
-                    + "into an account-enumeration oracle.")
+                    + "into an account-enumeration oracle. With X-Session-Transport: cookie "
+                    + "(the web app) both tokens are set as HttpOnly cookies and come back null "
+                    + "in the body.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Authenticated; tokens issued",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
@@ -332,19 +339,20 @@ public class AuthController {
                     + "address or wrong password, indistinguishable to the caller",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class))),
-            @ApiResponse(responseCode = "403", description = "The account exists but is blocked "
-                    + "or inactive, so no session may be opened",
+            @ApiResponse(responseCode = "403", description = "The password is right but the "
+                    + "account has not verified its email address: the client requests a code "
+                    + "(/email/verification/resend) and confirms it (/email/verify) before signing in",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class)))
     })
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request,
-                                               HttpServletRequest servlet) {
+                                               HttpServletRequest servlet,
+                                               HttpServletResponse response) {
         SecurityLoginFlow.LoginOutcome login = loginFlow.login(request.email(), request.password(),
                 clientIp(servlet), servlet.getHeader("User-Agent"))
                 .orElseThrow(AuthenticationRejectedException::new);
-        return ResponseEntity.ok(new LoginResponse(login.accessToken(), login.refreshToken(),
-                BEARER, login.expiresInSeconds(), AccountResponse.from(login.account())));
+        return ResponseEntity.ok(loginResponse(login, servlet, response));
     }
 
     @Operation(summary = "Sign in with Google",
@@ -373,12 +381,26 @@ public class AuthController {
     })
     @PostMapping("/google")
     public ResponseEntity<LoginResponse> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request,
-                                                         HttpServletRequest servlet) {
+                                                         HttpServletRequest servlet,
+                                                         HttpServletResponse response) {
         SecurityLoginFlow.LoginOutcome login = loginFlow.loginWithGoogle(request.code(),
                 clientIp(servlet), servlet.getHeader("User-Agent"))
                 .orElseThrow(AuthenticationRejectedException::new);
-        return ResponseEntity.ok(new LoginResponse(login.accessToken(), login.refreshToken(),
-                BEARER, login.expiresInSeconds(), AccountResponse.from(login.account())));
+        return ResponseEntity.ok(loginResponse(login, servlet, response));
+    }
+
+    /** The tokens go in the body, or in HttpOnly cookies when the caller asked for them. */
+    private LoginResponse loginResponse(SecurityLoginFlow.LoginOutcome login,
+                                        HttpServletRequest servlet, HttpServletResponse response) {
+        AccountResponse account = AccountResponse.from(login.account());
+        if (sessionCookies.requested(servlet)) {
+            sessionCookies.write(response, login.accessToken(), login.expiresInSeconds(),
+                    login.refreshToken());
+            return new LoginResponse(null, null, BEARER, login.expiresInSeconds(), account,
+                    login.idUserSession());
+        }
+        return new LoginResponse(login.accessToken(), login.refreshToken(), BEARER,
+                login.expiresInSeconds(), account, login.idUserSession());
     }
 
     /**
@@ -409,7 +431,9 @@ public class AuthController {
                     + "token, rotating the session. Reachable without an access token, which is "
                     + "the whole point: this is what a client calls once its access token has "
                     + "expired. Every failure leaves as the same 401 with the same body, so a "
-                    + "client cannot use it to learn which tokens are worth replaying.")
+                    + "client cannot use it to learn which tokens are worth replaying. A cookie "
+                    + "client (X-Session-Transport: cookie) sends no body: it presents the "
+                    + "refresh cookie and receives both cookies again.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Credentials renewed and the "
                     + "refresh token rotated",
@@ -430,15 +454,36 @@ public class AuthController {
                             schema = @Schema(implementation = ApiError.class)))
     })
     @PostMapping("/refresh")
-    public ResponseEntity<RefreshResponse> refresh(@Valid @RequestBody RefreshRequest request,
-                                                    HttpServletRequest servlet) {
+    public ResponseEntity<RefreshResponse> refresh(
+            @Valid @RequestBody(required = false) RefreshRequest request,
+            HttpServletRequest servlet, HttpServletResponse response) {
+        boolean cookies = sessionCookies.requested(servlet);
+        // A body wins; without one, a cookie client presents the refresh cookie. A cookie client
+        // whose cookie is gone has no session left: 401, like any other rejected token.
+        String presented;
+        if (request != null) {
+            presented = request.refreshToken();
+        } else if (cookies) {
+            presented = sessionCookies.refreshToken(servlet)
+                    .orElseThrow(AuthenticationRejectedException::new);
+        } else {
+            throw new IllegalArgumentException("refreshToken is required.");
+        }
         RefreshSessionResult result = refreshSession.refresh(
-                new RefreshSessionCommand(request.refreshToken(), clientIp(servlet)));
+                new RefreshSessionCommand(presented, clientIp(servlet)));
         if (!result.issued()) {
+            if (cookies) {
+                sessionCookies.clear(response);
+            }
             throw new AuthenticationRejectedException();
         }
-        return ResponseEntity.ok(new RefreshResponse(
-                tokenIssuer.issue(result.identity()), result.rawRefreshToken()));
+        String accessToken = tokenIssuer.issue(result.identity());
+        if (cookies) {
+            sessionCookies.write(response, accessToken, tokenIssuer.accessTokenTtl().toSeconds(),
+                    result.rawRefreshToken());
+            return ResponseEntity.ok(new RefreshResponse(null, null));
+        }
+        return ResponseEntity.ok(new RefreshResponse(accessToken, result.rawRefreshToken()));
     }
 
     /**
@@ -454,9 +499,10 @@ public class AuthController {
      */
     @Operation(summary = "Sign out",
             description = "Closes the named session. The session is closed, not revoked: "
-                    + "walking away is not a security event. The session identifier is read "
-                    + "from the access token's subject, so a caller can only close its own "
-                    + "session.",
+                    + "walking away is not a security event. The session is the one the login "
+                    + "answered (idUserSession) and must belong to the access token's subject: "
+                    + "another account's session is answered 404, like an unknown one. A cookie "
+                    + "client also gets both cookies cleared.",
             security = @SecurityRequirement(name = "bearerAuth"))
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Session closed",
@@ -480,52 +526,53 @@ public class AuthController {
     @PostMapping("/logout")
     public ResponseEntity<MessageResponse> logout(@Valid @RequestBody LogoutRequest request,
                                                   Authentication authentication,
-                                                  HttpServletRequest servlet) {
-        logoutUserSession.logout(new LogoutUserSessionCommand(request.idUserSession(),
-                authentication.getName(), clientIp(servlet)));
+                                                  HttpServletRequest servlet,
+                                                  HttpServletResponse response) {
+        try {
+            logoutUserSession.logout(new LogoutUserSessionCommand(request.idUserSession(),
+                    authentication.getName(), clientIp(servlet)));
+        } finally {
+            // Signing out drops the cookies even when the session was already gone.
+            if (sessionCookies.requested(servlet)) {
+                sessionCookies.clear(response);
+            }
+        }
         return ResponseEntity.ok(new MessageResponse("Session closed."));
     }
 
     /**
      * Requests a password reset.
      *
-     * <p>What this endpoint does: looks the account up, mints a reset token, hashes it, stores
-     * the hash, and answers 202. The response carries no body at all - not a message, and
-     * certainly not the token.
+     * <p>What this endpoint does: checks that the address belongs to an account, and then, off the
+     * request thread, mints a reset code, hashes it, stores the hash and hands the code to the mail
+     * channel. The response carries no body - certainly not the code.
      *
-     * <p>Silence is the point. An acknowledgement whose wording is the same for every caller
-     * says nothing about whether the address is registered, and an empty body says even less
-     * than a fixed sentence could. What the caller learns is that the request was received,
-     * which is all the endpoint is ever allowed to tell them.
+     * <p>An address with no account is answered 404, so the person learns at once that they typed
+     * another address. That reveals which addresses are registered, a decision taken knowingly:
+     * registration already answers 409 for a registered address, and the per-caller limit, charged
+     * before the lookup, bounds how fast anyone can ask.
      *
-     * <p>The token never comes back here. Returning it would hand a working credential to
-     * whoever asked and turn this endpoint into an account-takeover primitive. It leaves the
-     * server through {@link com.energymonitor.security.api.PasswordResetDeliveryPort}
-     * instead, an outbound channel the use case hands the secret to, and the database keeps
-     * only its hash. The controller never sees the secret at all: the use case's return value is
-     * discarded rather than translated into a DTO.
-     *
-     * <p>The delivery itself is not built yet: the shipped
-     * {@link com.energymonitor.security.api.PasswordResetDeliveryPort}
-     * implementation records the attempt instead of sending anything, so the handler is complete
-     * while the recovery flow is not. Making the flow work means implementing that port against
-     * the deployment's mail, SMS or push infrastructure; it does not mean changing this handler,
-     * and it must not mean echoing the token to get around the missing channel.
+     * <p>The code never comes back here. Returning it would hand a working credential to whoever
+     * asked and turn this endpoint into an account-takeover primitive. It leaves the server through
+     * {@link com.energymonitor.security.api.PasswordResetDeliveryPort}, and the database keeps only
+     * its hash.
      *
      * @param request the account address
-     * @return 202 with an empty body, whether or not the account exists
+     * @return 202 with an empty body when the account exists
      */
     @Operation(summary = "Request a password reset",
-            description = "Looks the account up, mints a reset token, hashes it, stores the "
-                    + "hash and hands the secret to the configured delivery channel. Always "
-                    + "answers 202 with no body at all - not a message, and never the token - "
-                    + "whether or not the account exists, because an acknowledgement whose "
-                    + "wording varies would reveal which addresses are registered.")
+            description = "Checks that the address belongs to an account and sends it a recovery "
+                    + "code. Answers 202 with no body - never the code - when it does, and 404 "
+                    + "when no account is registered with the address.")
     @ApiResponses({
             @ApiResponse(responseCode = "202", description = "Request accepted, empty body",
                     content = @Content),
             @ApiResponse(responseCode = "400", description = "Validation error: the body "
                     + "carries no email",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "404", description = "No account is registered with "
+                    + "the address",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class)))
     })
@@ -539,17 +586,16 @@ public class AuthController {
         // allowance is turned away without ever reaching the database.
         attemptLimiter.checkAllowed(caller);
 
-        // The whole flow leaves the request thread: resolving the account, minting the code and
-        // writing its delivery record. What the caller is told must not depend on any of that, and
-        // measuring it showed a request for a registered address answered in about 70 ms against
-        // about 24 ms for an unregistered one, which is enough to tell them apart. Answering before
-        // any of it runs removes the difference by construction rather than by padding.
+        // The address must belong to an account: otherwise the person is told so right away.
+        if (findUser.findByEmail(request.email()).isEmpty()) {
+            throw new UserNotFoundException("No account is registered with that email address.");
+        }
+
+        // Minting the code and writing its delivery record leave the request thread, so the answer
+        // does not wait for the mail channel.
         try {
             recoveryExecutor.execute(() -> issueCodeQuietly(request.email()));
         } catch (RejectedExecutionException queueFull) {
-            // Still 202. The endpoint acknowledges every request identically whether or not the
-            // account exists, so a full queue must not become a way to tell a registered address
-            // from an unregistered one either.
             LOG.warn("The recovery queue is full; a recovery request was not processed");
         }
         return ResponseEntity.accepted().build();
@@ -818,9 +864,13 @@ public class AuthController {
     @PostMapping("/account/delete")
     public ResponseEntity<Void> deleteAccount(@Valid @RequestBody DeleteAccountRequest request,
                                               Authentication authentication,
-                                              HttpServletRequest servlet) {
+                                              HttpServletRequest servlet,
+                                              HttpServletResponse response) {
         deleteAccount.delete(new DeleteAccountCommand(authentication.getName(), request.password(),
                 clientIp(servlet)));
+        if (sessionCookies.requested(servlet)) {
+            sessionCookies.clear(response);
+        }
         return ResponseEntity.noContent().build();
     }
 

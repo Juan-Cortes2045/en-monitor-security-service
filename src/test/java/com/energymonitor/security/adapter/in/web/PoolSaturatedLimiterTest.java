@@ -2,13 +2,23 @@ package com.energymonitor.security.adapter.in.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
+import com.energymonitor.security.application.port.in.FindUser;
+import com.energymonitor.security.domain.model.Email;
+import com.energymonitor.security.domain.model.PasswordHash;
+import com.energymonitor.security.domain.model.User;
+import com.energymonitor.security.domain.model.UserStatus;
 import com.energymonitor.security.infrastructure.JwtKeyedTest;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +26,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -27,6 +38,9 @@ import org.springframework.test.web.servlet.MockMvc;
  * it looks like, because a mock is consulted whether or not a pool is in the way. So the pool here
  * is cut to a single connection and held for the length of the test, and the assertion is that a
  * spent address still gets its answer on time.
+ *
+ * <p>The account lookup that decides between 202 and 404 is replaced, so the accepted requests that
+ * spend the window do not compete for the held connection: what is measured is the limiter alone.
  *
  * <p>{@code connection-timeout} is 250 ms and the ceiling asserted is 200 ms. That gap is the
  * actual assertion: a request that reached the pool could not have come back in under 200 ms, it
@@ -61,6 +75,16 @@ class PoolSaturatedLimiterTest extends JwtKeyedTest {
     @Autowired
     private DataSource dataSource;
 
+    @MockitoBean
+    private FindUser findUser;
+
+    @BeforeEach
+    void everyAddressHasAnAccount() {
+        given(findUser.findByEmail(any())).willReturn(Optional.of(new User("use0000001", "per0000001",
+                PasswordHash.of("$2a$10$" + "x".repeat(53)), Email.of("nadie-aqui@example.com"), true,
+                Instant.now(), UserStatus.ACTIVE, 0, null, null)));
+    }
+
     @Test
     @DisplayName("una direccion con la ventana agotada recibe 429 sin acquire")
     void refusesASpentAddressWithoutAConnection() throws Exception {
@@ -72,7 +96,7 @@ class PoolSaturatedLimiterTest extends JwtKeyedTest {
                 Call accepted = forgot("198.51.100.10");
                 assertThat(accepted.status()).isEqualTo(202);
                 assertThat(accepted.elapsedMs())
-                        .as("even an accepted request answers on the queue, not on the database")
+                        .as("an accepted request hands the code to the queue, not to the database")
                         .isLessThan(CEILING_MS);
             }
 
