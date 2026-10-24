@@ -55,6 +55,11 @@ public final class Email {
         return value;
     }
 
+    /** @return the part after {@code @}, the domain that receives the mail */
+    public String domain() {
+        return value.substring(value.lastIndexOf('@') + 1);
+    }
+
     @Override
     public boolean equals(Object other) {
         if (this == other) {

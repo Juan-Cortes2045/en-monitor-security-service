@@ -1,31 +1,35 @@
 package com.energymonitor.security.infrastructure;
 
-import com.energymonitor.security.application.port.in.SignInWithGoogle;
-import com.energymonitor.security.application.port.out.ProfileImageFetcherPort;
-import com.energymonitor.security.application.usecase.SignInWithGoogleService;
+import com.energymonitor.security.adapter.out.dns.DnsEmailDomainCheckAdapter;
+import com.energymonitor.security.adapter.out.security.InMemoryResetAttemptLimiter;
+import com.energymonitor.security.adapter.out.security.PepperedHmacResetCodeHasher;
+import com.energymonitor.security.api.AdministratorQuery;
 import com.energymonitor.security.api.EmailVerificationDeliveryPort;
 import com.energymonitor.security.api.PasswordResetDeliveryPort;
 import com.energymonitor.security.api.UserProfileQuery;
-import com.energymonitor.security.api.AdministratorQuery;
 import com.energymonitor.security.application.port.in.AdministerUserAccount;
 import com.energymonitor.security.application.port.in.AssignRole;
 import com.energymonitor.security.application.port.in.AuthenticateUser;
 import com.energymonitor.security.application.port.in.ChangePassword;
 import com.energymonitor.security.application.port.in.CheckPermission;
 import com.energymonitor.security.application.port.in.CreatePasswordResetToken;
+import com.energymonitor.security.application.port.in.CreateUserSession;
 import com.energymonitor.security.application.port.in.DeleteAccount;
 import com.energymonitor.security.application.port.in.EmailVerification;
-import com.energymonitor.security.application.port.in.CreateUserSession;
 import com.energymonitor.security.application.port.in.FindUser;
-import com.energymonitor.security.application.port.in.LogoutUserSession;
 import com.energymonitor.security.application.port.in.ListUserAccounts;
+import com.energymonitor.security.application.port.in.LogoutUserSession;
 import com.energymonitor.security.application.port.in.ManageUserStatus;
 import com.energymonitor.security.application.port.in.RefreshSession;
 import com.energymonitor.security.application.port.in.RegisterUser;
 import com.energymonitor.security.application.port.in.ResetPassword;
 import com.energymonitor.security.application.port.in.RevokeRole;
+import com.energymonitor.security.application.port.in.SignInWithGoogle;
 import com.energymonitor.security.application.port.in.UpdateUserProfile;
+import com.energymonitor.security.application.port.out.AccountDeletionGuardPort;
+import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
 import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
+import com.energymonitor.security.application.port.out.EmailDomainCheckPort;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
 import com.energymonitor.security.application.port.out.LoginErrorLogPersistencePort;
 import com.energymonitor.security.application.port.out.PasswordHasherPort;
@@ -34,16 +38,15 @@ import com.energymonitor.security.application.port.out.PasswordResetTokenHasherP
 import com.energymonitor.security.application.port.out.PasswordResetTokenPersistencePort;
 import com.energymonitor.security.application.port.out.PermissionPersistencePort;
 import com.energymonitor.security.application.port.out.PersonPersistencePort;
+import com.energymonitor.security.application.port.out.ProfileImageFetcherPort;
 import com.energymonitor.security.application.port.out.RefreshTokenHasherPort;
-import com.energymonitor.security.adapter.out.security.InMemoryResetAttemptLimiter;
-import com.energymonitor.security.adapter.out.security.PepperedHmacResetCodeHasher;
-import com.energymonitor.security.application.port.out.ResetAttemptLimiterPort;
 import com.energymonitor.security.application.port.out.RefreshTokenPersistencePort;
+import com.energymonitor.security.application.port.out.ResetAttemptLimiterPort;
 import com.energymonitor.security.application.port.out.SystemRolePermissionPersistencePort;
 import com.energymonitor.security.application.port.out.SystemRolePersistencePort;
 import com.energymonitor.security.application.port.out.TokenGeneratorPort;
-import com.energymonitor.security.application.port.out.UserPersistencePort;
 import com.energymonitor.security.application.port.out.UserDirectoryPort;
+import com.energymonitor.security.application.port.out.UserPersistencePort;
 import com.energymonitor.security.application.port.out.UserSessionPersistencePort;
 import com.energymonitor.security.application.port.out.UserSystemRolePersistencePort;
 import com.energymonitor.security.application.usecase.AdministerUserAccountService;
@@ -53,25 +56,25 @@ import com.energymonitor.security.application.usecase.AuthenticateUserService;
 import com.energymonitor.security.application.usecase.ChangePasswordService;
 import com.energymonitor.security.application.usecase.CheckPermissionService;
 import com.energymonitor.security.application.usecase.CreatePasswordResetTokenService;
-import com.energymonitor.security.application.usecase.DeleteAccountService;
-import com.energymonitor.security.application.port.out.AccountDeletionGuardPort;
-import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
-import com.energymonitor.security.application.usecase.EmailVerificationService;
-import com.energymonitor.security.application.usecase.UserProfileQueryService;
 import com.energymonitor.security.application.usecase.CreateUserSessionService;
+import com.energymonitor.security.application.usecase.DeleteAccountService;
+import com.energymonitor.security.application.usecase.EmailVerificationService;
 import com.energymonitor.security.application.usecase.FindUserService;
-import com.energymonitor.security.application.usecase.LogoutUserSessionService;
 import com.energymonitor.security.application.usecase.ListUserAccountsService;
+import com.energymonitor.security.application.usecase.LogoutUserSessionService;
 import com.energymonitor.security.application.usecase.ManageUserStatusService;
 import com.energymonitor.security.application.usecase.RefreshSessionService;
 import com.energymonitor.security.application.usecase.RegisterUserService;
 import com.energymonitor.security.application.usecase.ResetPasswordService;
 import com.energymonitor.security.application.usecase.RevokeRoleService;
+import com.energymonitor.security.application.usecase.SignInWithGoogleService;
 import com.energymonitor.security.application.usecase.UpdateUserProfileService;
+import com.energymonitor.security.application.usecase.UserProfileQueryService;
 import java.time.Clock;
 import java.time.Duration;
 import org.aopalliance.aop.Advice;
 import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -207,16 +210,28 @@ public class SecurityApplicationWiring {
         return inputPort.cast(proxyFactory.getProxy());
     }
 
+    /**
+     * The mail-domain check of registration. {@code security.email-domain-check.enabled=false}
+     * turns it off (the test profile does, so the suite never depends on the network).
+     */
+    @Bean
+    public EmailDomainCheckPort emailDomainCheck(
+            @Value("${security.email-domain-check.enabled:true}") boolean enabled) {
+        return enabled ? DnsEmailDomainCheckAdapter.usingSystemResolver(Duration.ofSeconds(3))
+                : domain -> true;
+    }
+
     @Bean
     public RegisterUser registerUser(UserPersistencePort users, PersonPersistencePort persons,
                                      PasswordPolicyPersistencePort policies,
                                      PasswordHasherPort hasher, IdentifierGeneratorPort identifiers,
                                      AuditLogPersistencePort audits,
-                                     AccountEventPublisherPort events, Clock clock,
+                                     AccountEventPublisherPort events,
+                                     EmailDomainCheckPort emailDomains, Clock clock,
                                      PlatformTransactionManager transactions) {
         return transactional(transactions,
                 new RegisterUserService(users, persons, policies, hasher, identifiers, audits,
-                        events, clock),
+                        events, emailDomains, clock),
                 RegisterUser.class);
     }
 

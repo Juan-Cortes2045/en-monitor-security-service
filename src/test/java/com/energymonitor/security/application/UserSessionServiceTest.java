@@ -93,14 +93,27 @@ class UserSessionServiceTest {
     }
 
     @Test
-    void attributesTheLogoutToTheSessionOwnerAndNotTheCommand() {
+    void cannotCloseASessionOfAnotherAccount() {
         users.seed("use0000002", "per0000002", "bob@example.com", UserStatus.ACTIVE);
         UserSession session = createSession.create(
                 new CreateUserSessionCommand("use0000002", "10.0.0.9", null));
 
-        logoutSession.logout(new LogoutUserSessionCommand(session.idUserSession(), "use0000001", "10.0.0.9"));
+        // Answered like an unknown session: the identifier is neither closed nor confirmed.
+        assertThrows(SessionNotFoundException.class, () -> logoutSession.logout(
+                new LogoutUserSessionCommand(session.idUserSession(), "use0000001", "10.0.0.9")));
 
-        assertFalse(sessions.findActive(session.idUserSession()).orElseThrow().isActive(CLOCK.instant()));
+        assertTrue(sessions.findActive(session.idUserSession()).orElseThrow().isActive(CLOCK.instant()));
+        assertTrue(audits.logs().isEmpty());
+    }
+
+    @Test
+    void attributesTheLogoutToTheSessionOwner() {
+        users.seed("use0000002", "per0000002", "bob@example.com", UserStatus.ACTIVE);
+        UserSession session = createSession.create(
+                new CreateUserSessionCommand("use0000002", "10.0.0.9", null));
+
+        logoutSession.logout(new LogoutUserSessionCommand(session.idUserSession(), "use0000002", "10.0.0.9"));
+
         AuditLog logout = audits.logs().getFirst();
         assertEquals(AuditAction.LOGOUT, logout.action());
         assertEquals("use0000002", logout.idUser().orElseThrow());

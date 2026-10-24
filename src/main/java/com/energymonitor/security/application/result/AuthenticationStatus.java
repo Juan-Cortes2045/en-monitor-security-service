@@ -18,5 +18,11 @@ public enum AuthenticationStatus {
     ACCOUNT_BLOCKED,
 
     /** The account exists but is inactive. */
-    ACCOUNT_INACTIVE
+    ACCOUNT_INACTIVE,
+
+    /**
+     * The password matched, but the account has not confirmed its address. Classified only after
+     * the password check, so it tells nothing to whoever does not know the password.
+     */
+    EMAIL_NOT_VERIFIED
 }

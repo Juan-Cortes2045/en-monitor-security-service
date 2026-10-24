@@ -7,6 +7,7 @@ import com.energymonitor.security.application.exception.AccountNotActiveExceptio
 import com.energymonitor.security.application.exception.GoogleSignInUnavailableException;
 import com.energymonitor.security.application.exception.CurrentPasswordMismatchException;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
+import com.energymonitor.security.application.exception.EmailNotVerifiedException;
 import com.energymonitor.security.application.exception.InvalidResetTokenException;
 import com.energymonitor.security.application.exception.InvalidVerificationCodeException;
 import com.energymonitor.security.application.exception.PasswordPolicyViolationException;
@@ -14,6 +15,7 @@ import com.energymonitor.security.application.exception.RoleNotFoundException;
 import com.energymonitor.security.application.exception.SecurityApplicationException;
 import com.energymonitor.security.application.exception.SelfAdministrationException;
 import com.energymonitor.security.application.exception.TooManyResetAttemptsException;
+import com.energymonitor.security.application.exception.UndeliverableEmailException;
 import com.energymonitor.security.application.exception.SessionNotFoundException;
 import com.energymonitor.security.application.exception.UserNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -260,6 +262,22 @@ public class SecurityExceptionHandler {
     }
 
     /**
+     * The password was right but the account has not confirmed its address. Only someone who knows
+     * the password gets here, so saying why is safe, and it is what lets the client ask for the
+     * verification code instead of showing a generic refusal.
+     *
+     * @param exception the application failure
+     * @param request   the failed request
+     * @return 403
+     */
+    @ExceptionHandler(EmailNotVerifiedException.class)
+    public ResponseEntity<ApiError> handleEmailNotVerified(EmailNotVerifiedException exception,
+                                                           HttpServletRequest request) {
+        LOG.debug("Sign-in refused until the address is verified on {}", request.getRequestURI());
+        return respond(HttpStatus.FORBIDDEN, "Verify your email address to sign in.", request);
+    }
+
+    /**
      * The password is well-formed but breaks the configured policy.
      *
      * @param exception the application failure
@@ -270,6 +288,20 @@ public class SecurityExceptionHandler {
     public ResponseEntity<ApiError> handlePolicyViolation(PasswordPolicyViolationException exception,
                                                            HttpServletRequest request) {
         return respond(HttpStatus.UNPROCESSABLE_ENTITY, exception.getMessage(), request);
+    }
+
+    /**
+     * The address is well-formed but its domain does not exist or cannot receive mail: a bad
+     * address, answered like any other invalid one (422 stays the password policy's).
+     *
+     * @param exception the application failure
+     * @param request   the failed request
+     * @return 400
+     */
+    @ExceptionHandler(UndeliverableEmailException.class)
+    public ResponseEntity<ApiError> handleUndeliverableEmail(UndeliverableEmailException exception,
+                                                             HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, exception.getMessage(), request);
     }
 
     /**

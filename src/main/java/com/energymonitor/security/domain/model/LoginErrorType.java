@@ -18,7 +18,10 @@ public enum LoginErrorType {
     ACCOUNT_BLOCKED,
 
     /** The account exists but is inactive. */
-    ACCOUNT_INACTIVE;
+    ACCOUNT_INACTIVE,
+
+    /** The password was right, but the account has not confirmed its address yet. */
+    EMAIL_NOT_VERIFIED;
 
     /**
      * Whether this error can be attributed to a known account.

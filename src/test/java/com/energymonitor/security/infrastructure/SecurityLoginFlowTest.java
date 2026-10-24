@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.verify;
 
 import com.energymonitor.security.application.command.AuthenticateUserCommand;
 import com.energymonitor.security.application.command.CreateUserSessionCommand;
+import com.energymonitor.security.application.exception.EmailNotVerifiedException;
 import com.energymonitor.security.application.port.in.AuthenticateUser;
 import com.energymonitor.security.application.port.in.CreateUserSession;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
@@ -193,6 +195,18 @@ class SecurityLoginFlowTest {
                 AuthenticationStatus.INVALID_CREDENTIALS, Optional.empty()));
 
         assertTrue(flow.login("someone@example.com", "wrong", "10.0.0.1", "JUnit").isEmpty());
+
+        verify(createUserSession, never()).create(any());
+        verify(tokenIssuer, never()).issue(any());
+    }
+
+    @Test
+    void refusesWithAReasonWhenTheAddressIsNotVerified() {
+        given(authenticateUser.authenticate(any())).willReturn(new AuthenticationResult(
+                AuthenticationStatus.EMAIL_NOT_VERIFIED, Optional.empty()));
+
+        assertThrows(EmailNotVerifiedException.class,
+                () -> flow.login("someone@example.com", "right", "10.0.0.1", "JUnit"));
 
         verify(createUserSession, never()).create(any());
         verify(tokenIssuer, never()).issue(any());

@@ -297,7 +297,8 @@ class SecuritySupportModelTest {
         void constantsMatchSchema() {
             assertThat(LoginErrorType.values())
                     .containsExactly(LoginErrorType.INVALID_PASSWORD, LoginErrorType.USER_NOT_FOUND,
-                            LoginErrorType.ACCOUNT_BLOCKED, LoginErrorType.ACCOUNT_INACTIVE);
+                            LoginErrorType.ACCOUNT_BLOCKED, LoginErrorType.ACCOUNT_INACTIVE,
+                            LoginErrorType.EMAIL_NOT_VERIFIED);
         }
     }
 
