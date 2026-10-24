@@ -23,6 +23,10 @@ import java.time.Instant;
  * <p>Nothing here marks the session revoked. A logged-out session is closed and inactive; it
  * is not evidence of a compromise, and keeping the two apart is what lets an audit tell them
  * apart later.
+ *
+ * <p>A caller closes only its own sessions: a session of another account is answered exactly
+ * like one that does not exist, so the identifier of someone else's session can neither end it
+ * nor be confirmed.
  */
 public class LogoutUserSessionService implements LogoutUserSession {
 
@@ -44,6 +48,7 @@ public class LogoutUserSessionService implements LogoutUserSession {
     public void logout(LogoutUserSessionCommand command) {
         Instant now = clock.instant();
         UserSession session = sessionPort.findActive(command.idUserSession())
+                .filter(found -> found.idUser().equals(command.idUser()))
                 .orElseThrow(() -> new SessionNotFoundException("no active session " + command.idUserSession()));
         // Logout is an ordinary termination, so the session is closed. It stays unrevoked, which
         // is the whole point of the distinction: this is not a security event.
