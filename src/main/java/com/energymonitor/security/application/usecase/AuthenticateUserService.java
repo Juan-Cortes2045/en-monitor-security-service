@@ -22,6 +22,9 @@ import java.util.Optional;
 
 /**
  * Authenticates an account, recording every attempt in the typed error or audit trail.
+ *
+ * <p>An account that has not confirmed its email address cannot sign in: the right password
+ * answers {@link AuthenticationStatus#EMAIL_NOT_VERIFIED} instead of a session.
  */
 public class AuthenticateUserService implements AuthenticateUser {
 
@@ -70,6 +73,13 @@ public class AuthenticateUserService implements AuthenticateUser {
             userPort.save(user);
             loginErrorLogPort.save(error(user, LoginErrorType.INVALID_PASSWORD, command.ipAddress(), now));
             return new AuthenticationResult(AuthenticationStatus.INVALID_CREDENTIALS, Optional.empty());
+        }
+
+        // No session until the address is confirmed. Checked after the password, so only the
+        // owner learns that the account exists and is waiting for its verification code.
+        if (!user.isEmailVerified()) {
+            loginErrorLogPort.save(error(user, LoginErrorType.EMAIL_NOT_VERIFIED, command.ipAddress(), now));
+            return new AuthenticationResult(AuthenticationStatus.EMAIL_NOT_VERIFIED, Optional.empty());
         }
 
         user.recordSuccessfulLogin(now);

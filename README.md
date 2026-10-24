@@ -65,8 +65,11 @@ refuses to start when a key is missing, unreadable or of the wrong kind, and nam
 
 ### The recovery code, and why it is short
 
-`POST /api/v1/auth/password/forgot` has energy-monitor-backend mail a **six-digit code**, valid for 15 minutes and usable
-once. Six digits is a usability decision — a person has to read it off a screen and
+`POST /api/v1/auth/password/forgot` answers **404** ("No account is registered with that email
+address.") when no account uses the address, so the person knows to try another one, and otherwise
+**202** while energy-monitor-backend mails a **six-digit code**, valid for 15 minutes and usable
+once. Saying which addresses are registered is a deliberate choice: registration already answers
+409 for a registered address, and the per-caller limit below is charged before the lookup. Six digits is a usability decision — a person has to read it off a screen and
 type it back — and on its own it would be no defence at all, about 20 bits. Two
 other things carry the weight:
 
@@ -104,9 +107,18 @@ absorb an office.
 
 ### The email verification code
 
+Before creating an account, registration checks that the domain of the address can receive mail:
+it must exist in DNS and publish a mail server (MX) or an address (A/AAAA). A mistyped or invented
+domain (`gmial.con`) is refused with **400** and nothing is created. When DNS cannot be reached the
+address is let through (an outage must not stop registrations) and the verification code below is
+what proves the mailbox. `SECURITY_EMAIL_DOMAIN_CHECK_ENABLED=false` turns the check off; the test
+profile does, so the suite never needs the network. Whether a given mailbox exists cannot be
+asked reliably (most providers do not tell, and probing them gets a server blacklisted): that is
+the code's job.
+
 Registering has energy-monitor-backend mail a six-digit code to the new address. `POST /api/v1/auth/email/verify`
 with `{email, code}` marks the address as verified; `POST /api/v1/auth/email/verification/resend`
-sends the current code again and always answers `202`, like the recovery request.
+sends the current code again and always answers `202`.
 
 The code is derived, not stored: `HMAC-SHA256` with the same pepper, over the account, its
 address and the current fifteen-minute window, reduced to six digits. A code is accepted during
@@ -114,8 +126,12 @@ its window and the next one, so it lives between 15 and 30 minutes, and changing
 invalidates it. Guessing is bounded twice: the per-address limit above, and five attempts per
 address per window, so spreading guesses over many callers does not help.
 
-An unverified account can still sign in. Verification records that the address works; it does
-not gate access.
+An account must verify its address before it can sign in. With the right password, an unverified
+account gets **403** ("Verify your email address to sign in.") instead of a session, recorded as
+`EMAIL_NOT_VERIFIED` in the login error trail. The check runs after the password, so only someone
+who knows the password learns that the account exists. The web app then asks for a new code
+(`/email/verification/resend`) and takes the person to enter it; after `/email/verify` the sign-in
+works. Accounts created with Google start verified.
 
 ### Deleting an account
 
@@ -180,6 +196,13 @@ Sign out and in again on the web, or reload it, and **Administration** appears i
 `ADMIN` to other accounts; the SQL is only needed for the first one. To undo it by hand:
 `DELETE FROM user_system_role WHERE system_role_id = 'rol0000001' AND user_id = '<id_user>';`.
 
+### Support contacts
+
+`GET /api/v1/support/contacts` is public: the support page of the web app reads it before anyone
+signs in. It answers the name and email address of every active administrator, sorted by name
+(`[]` while there is none), so the page can write to the administrator, or let the person choose
+one when there are several. Nothing else about the administrators is exposed.
+
 ### Sign in with Google
 
 `POST /api/v1/auth/google {code}` exchanges the authorization code of Google's sign-in popup
@@ -201,6 +224,37 @@ Setup (once per environment):
 4. Put the client ID and secret in this `.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) and the
    same client ID in the web app's `.env.local` (`VITE_GOOGLE_CLIENT_ID`); restart both. Both
    empty = the Google button answers `503`.
+
+### Sessions: tokens in the body or in HttpOnly cookies
+
+Sign-in (`/login`, `/google`) opens a session and answers its `idUserSession` together with a
+15-minute access token and a 7-day refresh token. How the client receives the tokens depends on
+one header:
+
+| Client | Header | Tokens |
+|---|---|---|
+| Mobile app | none | In the body. The refresh token goes back in the body of `/refresh`. |
+| Web app | `X-Session-Transport: cookie` | In HttpOnly cookies; `accessToken` and `refreshToken` come back `null`. No script on the page can read them, so an XSS cannot steal the session. |
+
+The cookies (`SessionCookies`):
+
+- **`em_access`**: the access token. `Path=/api`, lives as long as the token. The gateway turns it
+  into `Authorization: Bearer …` (only when the request also brings
+  `X-Requested-With: XMLHttpRequest`), so this service and the others keep validating a bearer
+  token.
+- **`em_refresh`**: the refresh token. `Path=/api/v1/auth`, so it only travels to the account
+  endpoints. `/refresh` reads it when the request has no body and brings the transport header,
+  rotates it and sets both cookies again; a rejected one clears them.
+- Both are `HttpOnly` and `SameSite=Strict`, and `Secure` unless
+  `SECURITY_SESSION_COOKIE_SECURE=false`. Turn that off only where the site is served over plain
+  HTTP (the local Docker stack and development mode); in production it stays on.
+- `/logout` and `/account/delete` clear them.
+
+The CSRF protection the ambient cookies need: a cross-site request never carries them
+(`SameSite=Strict`), and using them also takes a custom header a form or an image cannot send.
+
+`/logout {idUserSession}` closes only a session of the caller: another account's session is
+answered `404`, exactly like an unknown one.
 
 ## Running behind the API gateway
 

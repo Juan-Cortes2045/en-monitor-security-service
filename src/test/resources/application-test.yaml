@@ -31,6 +31,9 @@ management:
       enabled: false
 
 security:
+  # The suite never depends on the network: the mail-domain check of registration is off.
+  email-domain-check:
+    enabled: false
   reset:
     # Test-only pepper: committed on purpose, because it protects nothing outside the test profile
     # and has to be the same value on every machine for the suite to behave identically. Local and

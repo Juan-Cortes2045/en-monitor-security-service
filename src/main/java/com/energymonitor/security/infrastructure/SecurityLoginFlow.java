@@ -1,5 +1,6 @@
 package com.energymonitor.security.infrastructure;
 
+import com.energymonitor.security.application.exception.EmailNotVerifiedException;
 import com.energymonitor.security.application.exception.GoogleSignInUnavailableException;
 import com.energymonitor.security.application.port.in.SignInWithGoogle;
 import com.energymonitor.security.application.port.out.GoogleIdentityPort;
@@ -12,6 +13,7 @@ import com.energymonitor.security.application.port.out.RefreshTokenHasherPort;
 import com.energymonitor.security.application.port.out.RefreshTokenPersistencePort;
 import com.energymonitor.security.application.port.out.TokenGeneratorPort;
 import com.energymonitor.security.application.result.AuthenticatedUser;
+import com.energymonitor.security.application.result.AuthenticationStatus;
 import com.energymonitor.security.domain.model.RefreshToken;
 import com.energymonitor.security.domain.model.UserSession;
 import java.time.Clock;
@@ -75,16 +77,15 @@ public class SecurityLoginFlow {
      * What a successful login yields.
      *
      * @param accessToken      the signed JWT the client sends as a bearer token
-     * @param refreshToken     the opaque session token, currently returned in the login
-     *                         response body rather than in an HttpOnly cookie. There is no
-     *                         {@code /auth/refresh} endpoint yet, so nothing currently renews
-     *                         an access token with it; see {@code LoginResponse} for the
-     *                         transport decision left open for the refresh flow.
+     * @param refreshToken     the opaque session token, presented at {@code /auth/refresh}; the
+     *                         controller hands both tokens to the client in the body or in
+     *                         HttpOnly cookies (see {@code SessionCookies})
      * @param expiresInSeconds access token lifetime, so the client knows when to refresh
      * @param account          the authenticated identity
+     * @param idUserSession    the session just opened, which the client names at logout
      */
     public record LoginOutcome(String accessToken, String refreshToken, long expiresInSeconds,
-                               AuthenticatedUser account) {
+                               AuthenticatedUser account, String idUserSession) {
     }
 
     /**
@@ -95,11 +96,16 @@ public class SecurityLoginFlow {
      * @param ipAddress   the caller's address, recorded in the audit or error trail
      * @param userAgent   the caller's user agent, stored with the session
      * @return the issued credentials, or empty when the attempt was rejected
+     * @throws EmailNotVerifiedException when the password is right but the address is not
+     *                                   confirmed yet
      */
     public Optional<LoginOutcome> login(String email, String rawPassword, String ipAddress,
                                         String userAgent) {
         var result = authenticateUser.authenticate(
                 new AuthenticateUserCommand(email, rawPassword, ipAddress));
+        if (result.status() == AuthenticationStatus.EMAIL_NOT_VERIFIED) {
+            throw new EmailNotVerifiedException("email address not verified");
+        }
         if (!result.isSuccess()) {
             return Optional.empty();
         }
@@ -137,6 +143,6 @@ public class SecurityLoginFlow {
                 hasher.hash(rawToken), now, now.plus(REFRESH_TOKEN_TTL)));
 
         return new LoginOutcome(tokenIssuer.issue(identity), rawToken,
-                tokenIssuer.accessTokenTtl().toSeconds(), identity);
+                tokenIssuer.accessTokenTtl().toSeconds(), identity, session.idUserSession());
     }
 }

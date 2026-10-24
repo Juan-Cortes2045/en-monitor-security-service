@@ -91,7 +91,9 @@ public class SecurityFilterChainConfiguration {
         "/api/v1/auth/password/forgot",
         "/api/v1/auth/password/reset",
         "/api/v1/auth/email/verify",
-        "/api/v1/auth/email/verification/resend"
+        "/api/v1/auth/email/verification/resend",
+        // The public support page: read before signing in, often because signing in is the problem.
+        "/api/v1/support/contacts"
     };
 
     /**

@@ -10,6 +10,7 @@ import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.application.command.RegisterUserCommand;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
 import com.energymonitor.security.application.exception.PasswordPolicyViolationException;
+import com.energymonitor.security.application.exception.UndeliverableEmailException;
 import com.energymonitor.security.application.usecase.RegisterUserService;
 import com.energymonitor.security.domain.model.AuditAction;
 import com.energymonitor.security.domain.model.User;
@@ -17,7 +18,10 @@ import com.energymonitor.security.domain.model.UserStatus;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -40,8 +44,15 @@ class RegisterUserServiceTest {
             new UseCaseFixtures.FakeAuditLogPersistencePort();
     private final UseCaseFixtures.FakeAccountEventPublisherPort events =
             new UseCaseFixtures.FakeAccountEventPublisherPort();
+    /** Domains that "cannot receive mail" in these tests; every other one can. */
+    private final Set<String> deadDomains = new HashSet<>();
+    private final List<String> checkedDomains = new ArrayList<>();
     private final RegisterUserService register =
             new RegisterUserService(users, persons, policies, hasher, identifiers, audits, events,
+                    domain -> {
+                        checkedDomains.add(domain);
+                        return !deadDomains.contains(domain);
+                    },
                     CLOCK);
 
     private RegisterUserCommand command(String email, String password) {
@@ -114,5 +125,27 @@ class RegisterUserServiceTest {
                 () -> register.register(command("ADA@Example.com", UseCaseFixtures.PASSWORD)));
         assertNotNull(error);
         assertEquals(1, users.users().size());
+    }
+
+    @Test
+    void refusesAnAddressWhoseDomainCannotReceiveMailAndCreatesNothing() {
+        deadDomains.add("gmial.con");
+
+        UndeliverableEmailException error = assertThrows(UndeliverableEmailException.class,
+                () -> register.register(command("Ana@Gmial.con", UseCaseFixtures.PASSWORD)));
+
+        assertTrue(error.getMessage().contains("cannot receive mail"));
+        assertEquals(List.of("gmial.con"), checkedDomains);
+        assertTrue(users.users().isEmpty());
+        assertTrue(persons.findActive("id0000001").isEmpty());
+        assertTrue(events.events().isEmpty());
+    }
+
+    @Test
+    void checksTheDomainOnlyAfterTheCheapRefusals() {
+        assertThrows(PasswordPolicyViolationException.class,
+                () -> register.register(command("ada@example.com", "short")));
+
+        assertTrue(checkedDomains.isEmpty());
     }
 }

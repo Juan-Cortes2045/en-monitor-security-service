@@ -1,12 +1,14 @@
 package com.energymonitor.security.application.usecase;
 
+import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.application.command.RegisterUserCommand;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
 import com.energymonitor.security.application.exception.PasswordPolicyViolationException;
+import com.energymonitor.security.application.exception.UndeliverableEmailException;
 import com.energymonitor.security.application.port.in.RegisterUser;
-import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
 import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
+import com.energymonitor.security.application.port.out.EmailDomainCheckPort;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
 import com.energymonitor.security.application.port.out.PasswordHasherPort;
 import com.energymonitor.security.application.port.out.PasswordPolicyPersistencePort;
@@ -33,6 +35,7 @@ public class RegisterUserService implements RegisterUser {
     private final IdentifierGeneratorPort identifiers;
     private final AuditLogPersistencePort auditLogPort;
     private final AccountEventPublisherPort events;
+    private final EmailDomainCheckPort emailDomains;
     private final Clock clock;
 
     public RegisterUserService(UserPersistencePort userPort, PersonPersistencePort personPort,
@@ -40,7 +43,8 @@ public class RegisterUserService implements RegisterUser {
                                PasswordHasherPort passwordHasher,
                                IdentifierGeneratorPort identifiers,
                                AuditLogPersistencePort auditLogPort,
-                               AccountEventPublisherPort events, Clock clock) {
+                               AccountEventPublisherPort events,
+                               EmailDomainCheckPort emailDomains, Clock clock) {
         this.userPort = userPort;
         this.personPort = personPort;
         this.passwordPolicyPort = passwordPolicyPort;
@@ -48,6 +52,7 @@ public class RegisterUserService implements RegisterUser {
         this.identifiers = identifiers;
         this.auditLogPort = auditLogPort;
         this.events = events;
+        this.emailDomains = emailDomains;
         this.clock = clock;
     }
 
@@ -62,6 +67,12 @@ public class RegisterUserService implements RegisterUser {
         }
         if (userPort.findActiveByEmail(email).isPresent()) {
             throw new EmailAlreadyRegisteredException("an account already exists for " + email);
+        }
+        // An invented or mistyped domain can never receive the verification code: refused before
+        // anything is created. Whether the mailbox itself exists is what the code then proves.
+        if (!emailDomains.acceptsMail(email.domain())) {
+            throw new UndeliverableEmailException("The domain of the email address does not exist "
+                    + "or cannot receive mail.");
         }
 
         Person person = new Person(identifiers.generate(), command.name(), command.lastName());
