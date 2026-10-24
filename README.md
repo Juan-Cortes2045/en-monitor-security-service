@@ -196,6 +196,13 @@ Sign out and in again on the web, or reload it, and **Administration** appears i
 `ADMIN` to other accounts; the SQL is only needed for the first one. To undo it by hand:
 `DELETE FROM user_system_role WHERE system_role_id = 'rol0000001' AND user_id = '<id_user>';`.
 
+### Support contacts
+
+`GET /api/v1/support/contacts` is public: the support page of the web app reads it before anyone
+signs in. It answers the name and email address of every active administrator, sorted by name
+(`[]` while there is none), so the page can write to the administrator, or let the person choose
+one when there are several. Nothing else about the administrators is exposed.
+
 ### Sign in with Google
 
 `POST /api/v1/auth/google {code}` exchanges the authorization code of Google's sign-in popup
