@@ -770,11 +770,10 @@ public class AuthController {
      * address and the avatar, is committed in the same transaction but is not echoed here; it is
      * read from {@code GET /api/v1/auth/account}.
      *
-     * <p><strong>Partial updates, and the name as a pair.</strong> Every field is optional and an
-     * absent one is left untouched. The name is the exception worth stating plainly: a person
-     * is required to have both a first name and a last name (INV-001) and the aggregate replaces
-     * them together, so sending one of the two leaves both of them unchanged. A client renames by
-     * sending both.
+     * <p><strong>Partial updates.</strong> Every field is optional and an absent one is left
+     * untouched, the two halves of the name included: {@code name} alone keeps the last name and
+     * {@code lastName} alone keeps the first name. The first name is required, so a blank one is
+     * 400; the last name is optional, so a blank one removes it.
      *
      * <p><strong>No phone number is accepted, stored or returned.</strong> Notifications are
      * email only, so the field was removed from the domain, from the {@code person} table and
