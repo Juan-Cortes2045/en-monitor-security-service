@@ -55,6 +55,7 @@ public class UserMapper {
         entity.setLastLoginAt(Instants.truncate(user.lastLoginAt().orElse(null)));
         entity.setProfileImage(user.profileImage().orElse(null));
         entity.setGoogleSubject(user.googleSubject().orElse(null));
+        entity.setTermsAcceptedAt(Instants.truncate(user.termsAcceptedAt().orElse(null)));
     }
 
     /**
@@ -77,6 +78,9 @@ public class UserMapper {
                 entity.getProfileImage());
         if (entity.getGoogleSubject() != null) {
             user.bindGoogleAccount(entity.getGoogleSubject());
+        }
+        if (entity.getTermsAcceptedAt() != null) {
+            user.acceptTerms(entity.getTermsAcceptedAt());
         }
         return user;
     }
