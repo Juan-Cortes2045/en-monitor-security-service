@@ -356,16 +356,20 @@ public class AuthController {
     }
 
     @Operation(summary = "Sign in with Google",
-            description = "Exchanges the authorization code of Google's sign-in popup for the "
-                    + "usual credentials. The first time it creates the account with the name, "
+            description = "Exchanges the authorization code of Google's sign-in popup (web, "
+                    + "{code}) or the ID token of the native sign-in (mobile app, {idToken}) for "
+                    + "the usual credentials. The first time it creates the account with the name, "
                     + "last name, photo and address of the Google account. An address that "
                     + "belongs to an account registered with a password is refused with 409.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Signed in",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = LoginResponse.class))),
-            @ApiResponse(responseCode = "401", description = "Invalid or expired code, or an "
-                    + "address Google did not verify",
+            @ApiResponse(responseCode = "400", description = "Neither or both of code and idToken",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "401", description = "Invalid or expired code or ID "
+                    + "token, or an address Google did not verify",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class))),
             @ApiResponse(responseCode = "403", description = "The account is blocked or inactive",
@@ -383,8 +387,11 @@ public class AuthController {
     public ResponseEntity<LoginResponse> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request,
                                                          HttpServletRequest servlet,
                                                          HttpServletResponse response) {
-        SecurityLoginFlow.LoginOutcome login = loginFlow.loginWithGoogle(request.code(),
-                clientIp(servlet), servlet.getHeader("User-Agent"))
+        String ip = clientIp(servlet);
+        String userAgent = servlet.getHeader("User-Agent");
+        SecurityLoginFlow.LoginOutcome login = (request.hasIdToken()
+                ? loginFlow.loginWithGoogleIdToken(request.idToken(), ip, userAgent)
+                : loginFlow.loginWithGoogle(request.code(), ip, userAgent))
                 .orElseThrow(AuthenticationRejectedException::new);
         return ResponseEntity.ok(loginResponse(login, servlet, response));
     }

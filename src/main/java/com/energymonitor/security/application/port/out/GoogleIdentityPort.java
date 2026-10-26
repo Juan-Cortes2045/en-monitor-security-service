@@ -4,7 +4,8 @@ import com.energymonitor.security.application.result.GoogleIdentity;
 import java.util.Optional;
 
 /**
- * Exchanges the authorization code the browser got from Google for a verified identity.
+ * Turns what a client got from Google (the web popup's authorization code, or the mobile app's
+ * ID token) into a verified identity.
  */
 public interface GoogleIdentityPort {
 
@@ -16,4 +17,10 @@ public interface GoogleIdentityPort {
      *         empty for an invalid, expired or reused code
      */
     Optional<GoogleIdentity> exchange(String authorizationCode);
+
+    /**
+     * @return the identity of an ID token signed by Google, issued by Google and addressed to
+     *         this client; empty for a forged, expired or foreign token
+     */
+    Optional<GoogleIdentity> verify(String idToken);
 }

@@ -14,6 +14,7 @@ import com.energymonitor.security.application.port.out.RefreshTokenPersistencePo
 import com.energymonitor.security.application.port.out.TokenGeneratorPort;
 import com.energymonitor.security.application.result.AuthenticatedUser;
 import com.energymonitor.security.application.result.AuthenticationStatus;
+import com.energymonitor.security.application.result.GoogleIdentity;
 import com.energymonitor.security.domain.model.RefreshToken;
 import com.energymonitor.security.domain.model.UserSession;
 import java.time.Clock;
@@ -121,10 +122,33 @@ public class SecurityLoginFlow {
      */
     public Optional<LoginOutcome> loginWithGoogle(String authorizationCode, String ipAddress,
                                                   String userAgent) {
+        requireGoogle();
+        return signInAs(google.exchange(authorizationCode), ipAddress, userAgent);
+    }
+
+    /**
+     * Signs in with the ID token of the mobile app's native Google sign-in, with the same rules
+     * as {@link #loginWithGoogle}: the account is created the first time and an address
+     * registered with a password is refused.
+     *
+     * @return empty when the token is invalid or Google did not verify the address
+     * @throws GoogleSignInUnavailableException when no Google client is configured
+     */
+    public Optional<LoginOutcome> loginWithGoogleIdToken(String idToken, String ipAddress,
+                                                         String userAgent) {
+        requireGoogle();
+        return signInAs(google.verify(idToken), ipAddress, userAgent);
+    }
+
+    private void requireGoogle() {
         if (!google.isConfigured()) {
             throw new GoogleSignInUnavailableException("Google sign-in is not configured");
         }
-        return google.exchange(authorizationCode)
+    }
+
+    private Optional<LoginOutcome> signInAs(Optional<GoogleIdentity> googleIdentity,
+                                            String ipAddress, String userAgent) {
+        return googleIdentity
                 .flatMap(identity -> signInWithGoogle.signIn(identity, ipAddress))
                 .map(identity -> open(identity, ipAddress, userAgent));
     }

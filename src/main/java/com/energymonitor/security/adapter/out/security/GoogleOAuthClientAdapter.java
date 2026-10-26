@@ -33,6 +33,10 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>The code is single-use and only valid with the client secret, which never leaves the
  * server: a browser cannot make the backend believe it is somebody else.
+ *
+ * <p>The mobile app signs in natively and sends the ID token itself. It asks Google for it with
+ * this same (web) client id as {@code webClientId}, so the token goes through exactly the same
+ * checks: an ID token issued for another app has another audience and is refused.
  */
 @Component
 public class GoogleOAuthClientAdapter implements GoogleIdentityPort {
@@ -102,11 +106,7 @@ public class GoogleOAuthClientAdapter implements GoogleIdentityPort {
             if (!(idToken instanceof String raw)) {
                 return Optional.empty();
             }
-            Jwt jwt = decoder.decode(raw);
-            return Optional.of(new GoogleIdentity(jwt.getSubject(), jwt.getClaimAsString("email"),
-                    Boolean.TRUE.equals(jwt.getClaimAsBoolean("email_verified")),
-                    jwt.getClaimAsString("given_name"), jwt.getClaimAsString("family_name"),
-                    jwt.getClaimAsString("name"), jwt.getClaimAsString("picture")));
+            return Optional.of(identityOf(raw));
         } catch (JwtException e) {
             LOG.warn("Google ID token rejected: {}", e.getMessage());
             return Optional.empty();
@@ -117,5 +117,27 @@ public class GoogleOAuthClientAdapter implements GoogleIdentityPort {
             LOG.warn("Google sign-in failed: {}", e.getMessage());
             return Optional.empty();
         }
+    }
+
+    @Override
+    public Optional<GoogleIdentity> verify(String idToken) {
+        if (!isConfigured() || idToken == null || idToken.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(identityOf(idToken));
+        } catch (JwtException e) {
+            LOG.warn("Google ID token rejected: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** Decodes and validates the token (signature, expiry, issuer, audience) before reading it. */
+    private GoogleIdentity identityOf(String rawIdToken) {
+        Jwt jwt = decoder.decode(rawIdToken);
+        return new GoogleIdentity(jwt.getSubject(), jwt.getClaimAsString("email"),
+                Boolean.TRUE.equals(jwt.getClaimAsBoolean("email_verified")),
+                jwt.getClaimAsString("given_name"), jwt.getClaimAsString("family_name"),
+                jwt.getClaimAsString("name"), jwt.getClaimAsString("picture"));
     }
 }
