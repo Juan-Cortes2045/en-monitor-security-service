@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        user.terms_accepted_at: when the owner accepted the terms and conditions. No account signs
+        in without it, whatever the sign-in method.
+
+        Accounts registered with a password accepted them in the registration form, which never
+        let the form through without the checkbox: they take their registration date. Accounts
+        created with Google were never asked, so they stay NULL and accept at their next sign-in.
+    -->
+    <changeSet id="security-029-add-user-terms-accepted-at" author="JuanCortes2045">
+        <comment>user.terms_accepted_at: acceptance of the terms and conditions.</comment>
+        <addColumn tableName="user">
+            <column name="terms_accepted_at" type="TIMESTAMP"/>
+        </addColumn>
+        <update tableName="user">
+            <column name="terms_accepted_at" valueComputed="registration_date"/>
+            <where>google_subject IS NULL</where>
+        </update>
+
+        <rollback>
+            <dropColumn tableName="user" columnName="terms_accepted_at"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>
