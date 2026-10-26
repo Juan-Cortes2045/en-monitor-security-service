@@ -105,33 +105,54 @@ balancer, add a rate limiter there too. And because the limit is keyed by addres
 everyone behind one NAT shares it, which is why the allowance is generous enough to
 absorb an office.
 
-### The email verification code
+### Registration and the email verification code
 
-Before creating an account, registration checks that the domain of the address can receive mail:
-it must exist in DNS and publish a mail server (MX) or an address (A/AAAA). A mistyped or invented
-domain (`gmial.con`) is refused with **400** and nothing is created. When DNS cannot be reached the
-address is let through (an outage must not stop registrations) and the verification code below is
-what proves the mailbox. `SECURITY_EMAIL_DOMAIN_CHECK_ENABLED=false` turns the check off; the test
-profile does, so the suite never needs the network. Whether a given mailbox exists cannot be
-asked reliably (most providers do not tell, and probing them gets a server blacklisted): that is
-the code's job.
+**No account exists until its address is verified.** `POST /api/v1/auth/register` validates the
+request and answers **202** with `{email, expiresAt}`; it writes no `person` and no `user` row.
+It keeps the request in `pending_registration` (password hashed) and has energy-monitor-backend
+mail a six-digit code to the address. `POST /api/v1/auth/email/verify` with `{email, code}` is what
+creates the account: the person and the user, already verified, an audit `CREATE` entry and the
+`account.registered` event, and the request is deleted. An address nobody reads therefore never
+becomes an account: its request expires after **24 hours** and an hourly job deletes it
+(`security.registration.purge-enabled=false` turns the job off).
 
-Registering has energy-monitor-backend mail a six-digit code to the new address. `POST /api/v1/auth/email/verify`
-with `{email, code}` marks the address as verified; `POST /api/v1/auth/email/verification/resend`
-sends the current code again and always answers `202`.
+- The request reserves the account's identifier, so the code (derived from it) and the
+  delivery record of the mail already point at the account it becomes.
+- Registering again with the same address replaces the request and invalidates its code (a
+  mistyped password can be fixed that way). An address that already has an account gets **409**.
+- `POST /api/v1/auth/email/verification/resend` sends the current code again, for a request or for
+  an account whose address changed, and always answers `202`.
 
-The code is derived, not stored: `HMAC-SHA256` with the same pepper, over the account, its
-address and the current fifteen-minute window, reduced to six digits. A code is accepted during
-its window and the next one, so it lives between 15 and 30 minutes, and changing the address
-invalidates it. Guessing is bounded twice: the per-address limit above, and five attempts per
-address per window, so spreading guesses over many callers does not help.
+Before keeping a request, registration checks the domain of the address in two steps, and so
+does a profile update that changes the email:
 
-An account must verify its address before it can sign in. With the right password, an unverified
-account gets **403** ("Verify your email address to sign in.") instead of a session, recorded as
-`EMAIL_NOT_VERIFIED` in the login error trail. The check runs after the password, so only someone
-who knows the password learns that the account exists. The web app then asks for a new code
+1. **Mistyped provider.** A domain one or two keystrokes away from a well-known provider
+   (`meil.com` → `mail.com`, `gmial.con` → `gmail.com`, `hotmail.co` → `hotmail.com`) is refused
+   with **400**, and the message names the provider it was probably meant to be. DNS cannot catch
+   these: many are registered on purpose and publish real mail servers that collect whatever is
+   sent to them. The providers and the tolerance are in `domain/service/MistypedEmailDomains`.
+2. **Deliverable domain.** It must exist in DNS and publish a mail server (MX) or an address
+   (A/AAAA). An invented domain is refused with **400** and nothing is stored. When DNS cannot
+   be reached the address is let through (an outage must not stop registrations).
+   `SECURITY_EMAIL_DOMAIN_CHECK_ENABLED=false` turns this step off; the test profile does, so the
+   suite never needs the network.
+
+Neither step proves that the mailbox exists: that cannot be asked reliably (most providers do not
+tell, and probing them gets a server blacklisted). That is the verification code's job.
+
+The code is derived, not stored: `HMAC-SHA256` with the same pepper, over the account identifier
+(the reserved one for a request), the address and the current fifteen-minute window, reduced to
+six digits. A code is accepted during its window and the next one, so it lives between 15 and 30
+minutes, and changing the address invalidates it. Guessing is bounded twice: the per-address limit
+above, and five attempts per address per window, so spreading guesses over many callers does not
+help.
+
+Signing in needs a verified address. With the right password, a request still waiting for its
+code, or an account whose changed address is not verified yet, gets **403** ("Verify your email
+address to sign in.") instead of a session. The check runs after the password, so only someone
+who knows the password learns that the registration exists. The web app then asks for a new code
 (`/email/verification/resend`) and takes the person to enter it; after `/email/verify` the sign-in
-works. Accounts created with Google start verified.
+works. Accounts created with Google start verified and skip the request.
 
 ### Deleting an account
 
