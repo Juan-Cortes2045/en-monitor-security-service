@@ -5,12 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.energymonitor.security.adapter.out.security.InMemoryResetAttemptLimiter;
 import com.energymonitor.security.adapter.out.security.PepperedHmacResetCodeHasher;
+import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.api.EmailVerificationDeliveryPort;
 import com.energymonitor.security.application.exception.InvalidVerificationCodeException;
 import com.energymonitor.security.application.exception.TooManyResetAttemptsException;
 import com.energymonitor.security.application.usecase.EmailVerificationService;
 import com.energymonitor.security.domain.model.Email;
 import com.energymonitor.security.domain.model.PasswordHash;
+import com.energymonitor.security.domain.model.PendingRegistration;
 import com.energymonitor.security.domain.model.User;
 import com.energymonitor.security.domain.model.UserStatus;
 import java.time.Clock;
@@ -32,11 +34,27 @@ class EmailVerificationServiceTest {
     private final PepperedHmacResetCodeHasher hasher =
             new PepperedHmacResetCodeHasher("test-pepper-of-sufficient-length-0123");
     private final RecordingDelivery delivery = new RecordingDelivery();
+    private final UseCaseFixtures.FakePendingRegistrationPersistencePort pending =
+            new UseCaseFixtures.FakePendingRegistrationPersistencePort();
+    private final UseCaseFixtures.FakePersonPersistencePort persons =
+            new UseCaseFixtures.FakePersonPersistencePort();
+    private final UseCaseFixtures.FakeAuditLogPersistencePort audits =
+            new UseCaseFixtures.FakeAuditLogPersistencePort();
+    private final UseCaseFixtures.FakeAccountEventPublisherPort events =
+            new UseCaseFixtures.FakeAccountEventPublisherPort();
+    private final UseCaseFixtures.FakeIdentifierGeneratorPort identifiers =
+            new UseCaseFixtures.FakeIdentifierGeneratorPort();
 
     private EmailVerificationService serviceAt(Instant instant) {
         Clock clock = Clock.fixed(instant, ZoneOffset.UTC);
-        return new EmailVerificationService(users, hasher, delivery,
-                new InMemoryResetAttemptLimiter(5, Duration.ofMinutes(15), clock), clock);
+        return new EmailVerificationService(users, pending, persons, audits, events, identifiers,
+                hasher, delivery, new InMemoryResetAttemptLimiter(5, Duration.ofMinutes(15), clock),
+                clock);
+    }
+
+    private PendingRegistration registered(Instant at) {
+        return pending.save(PendingRegistration.request("use0000009", Email.of(EMAIL), "Ada",
+                "Lovelace", PasswordHash.of("hash:secret"), null, "10.0.0.7", at));
     }
 
     private User unverified() {
@@ -46,7 +64,7 @@ class EmailVerificationServiceTest {
 
     private String sentCode() {
         serviceAt(NOW).sendCode(EMAIL);
-        return delivery.sent.getLast().clearCode();
+        return delivery.sent.isEmpty() ? null : delivery.sent.getLast().clearCode();
     }
 
     @Test
@@ -125,6 +143,66 @@ class EmailVerificationServiceTest {
 
         assertThatThrownBy(() -> service.verify(EMAIL, code))
                 .isInstanceOf(TooManyResetAttemptsException.class);
+    }
+
+    @Test
+    @DisplayName("a registration gets its code at the identifier the account will take")
+    void sendsTheCodeOfARegistration() {
+        registered(NOW);
+
+        serviceAt(NOW).sendCode(EMAIL);
+
+        assertThat(delivery.sent).singleElement()
+                .satisfies(sent -> {
+                    assertThat(sent.userId()).isEqualTo("use0000009");
+                    assertThat(sent.recipient()).isEqualTo(EMAIL);
+                });
+    }
+
+    @Test
+    @DisplayName("the code of a registration creates the account, verified, and forgets the request")
+    void theCodeOfARegistrationCreatesTheAccount() {
+        registered(NOW);
+
+        serviceAt(NOW).verify(EMAIL, sentCode());
+
+        User account = users.findActive("use0000009").orElseThrow();
+        assertThat(account.email().value()).isEqualTo(EMAIL);
+        assertThat(account.isEmailVerified()).isTrue();
+        assertThat(account.status()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(account.passwordHash()).isEqualTo(PasswordHash.of("hash:secret"));
+        assertThat(persons.findActive(account.idPerson()).orElseThrow().name()).isEqualTo("Ada");
+        assertThat(audits.logs()).singleElement()
+                .satisfies(log -> assertThat(log.ipAddress()).contains("10.0.0.7"));
+        assertThat(events.eventsOf(AccountRegistered.class))
+                .containsExactly(new AccountRegistered("use0000009", EMAIL, NOW));
+        assertThat(pending.registrations()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a wrong code creates nothing and keeps the registration")
+    void aWrongCodeCreatesNothing() {
+        registered(NOW);
+        String wrong = sentCode().equals("000000") ? "000001" : "000000";
+
+        assertThatThrownBy(() -> serviceAt(NOW).verify(EMAIL, wrong))
+                .isInstanceOf(InvalidVerificationCodeException.class);
+
+        assertThat(users.users()).isEmpty();
+        assertThat(pending.registrations()).hasSize(1);
+        assertThat(events.events()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("an expired registration can no longer become an account nor get a code")
+    void anExpiredRegistrationIsGone() {
+        registered(NOW.minus(PendingRegistration.LIFETIME));
+        String code = sentCode();
+
+        assertThat(delivery.sent).isEmpty();
+        assertThatThrownBy(() -> serviceAt(NOW).verify(EMAIL, code == null ? "123456" : code))
+                .isInstanceOf(InvalidVerificationCodeException.class);
+        assertThat(users.users()).isEmpty();
     }
 
     private record Sent(String userId, String recipient, String clearCode, Instant validUntil) {

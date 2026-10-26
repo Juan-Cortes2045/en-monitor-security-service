@@ -1,19 +1,16 @@
 package com.energymonitor.security.application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.application.command.RegisterUserCommand;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
 import com.energymonitor.security.application.exception.PasswordPolicyViolationException;
 import com.energymonitor.security.application.exception.UndeliverableEmailException;
 import com.energymonitor.security.application.usecase.RegisterUserService;
-import com.energymonitor.security.domain.model.AuditAction;
-import com.energymonitor.security.domain.model.User;
+import com.energymonitor.security.domain.model.PendingRegistration;
 import com.energymonitor.security.domain.model.UserStatus;
 import java.time.Clock;
 import java.time.Instant;
@@ -25,8 +22,9 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@code RegisterUser} requirements: hashes through the hasher port, persists person and user,
- * rejects duplicate addresses and policy-violating passwords.
+ * {@code RegisterUser} requirements: keeps a registration waiting for its code, with the password
+ * hashed; creates no person and no account; refuses taken addresses, mistyped or undeliverable
+ * domains and policy-violating passwords.
  */
 class RegisterUserServiceTest {
 
@@ -34,21 +32,18 @@ class RegisterUserServiceTest {
             Clock.fixed(Instant.parse("2026-03-01T12:00:00Z"), ZoneOffset.UTC);
 
     private final UseCaseFixtures.FakeUserPersistencePort users = new UseCaseFixtures.FakeUserPersistencePort();
-    private final UseCaseFixtures.FakePersonPersistencePort persons = new UseCaseFixtures.FakePersonPersistencePort();
+    private final UseCaseFixtures.FakePendingRegistrationPersistencePort pending =
+            new UseCaseFixtures.FakePendingRegistrationPersistencePort();
     private final UseCaseFixtures.FakePasswordPolicyPersistencePort policies =
             new UseCaseFixtures.FakePasswordPolicyPersistencePort();
     private final UseCaseFixtures.FakePasswordHasherPort hasher = new UseCaseFixtures.FakePasswordHasherPort();
     private final UseCaseFixtures.FakeIdentifierGeneratorPort identifiers =
             new UseCaseFixtures.FakeIdentifierGeneratorPort();
-    private final UseCaseFixtures.FakeAuditLogPersistencePort audits =
-            new UseCaseFixtures.FakeAuditLogPersistencePort();
-    private final UseCaseFixtures.FakeAccountEventPublisherPort events =
-            new UseCaseFixtures.FakeAccountEventPublisherPort();
     /** Domains that "cannot receive mail" in these tests; every other one can. */
     private final Set<String> deadDomains = new HashSet<>();
     private final List<String> checkedDomains = new ArrayList<>();
     private final RegisterUserService register =
-            new RegisterUserService(users, persons, policies, hasher, identifiers, audits, events,
+            new RegisterUserService(users, pending, policies, hasher, identifiers,
                     domain -> {
                         checkedDomains.add(domain);
                         return !deadDomains.contains(domain);
@@ -61,84 +56,83 @@ class RegisterUserServiceTest {
     }
 
     @Test
-    void registersActiveUserWithHashedPasswordAndCreatesPerson() {
-        User user = register.register(command("ada@example.com", UseCaseFixtures.PASSWORD));
+    void keepsTheRegistrationWithTheHashedPasswordUntilItIsVerified() {
+        PendingRegistration registration =
+                register.register(command("ada@example.com", UseCaseFixtures.PASSWORD));
 
-        assertEquals(UserStatus.ACTIVE, user.status());
-        assertTrue(hasher.matches(UseCaseFixtures.PASSWORD, user.passwordHash()));
-        assertTrue(persons.findActive(user.idPerson()).isPresent());
-        assertTrue(users.findActive(user.idUser()).isPresent());
+        assertEquals("ada@example.com", registration.email().value());
+        assertEquals("Ada", registration.name());
+        assertTrue(hasher.matches(UseCaseFixtures.PASSWORD, registration.passwordHash()));
+        assertEquals("10.0.0.1", registration.ipAddress().orElseThrow());
+        assertEquals(CLOCK.instant().plus(PendingRegistration.LIFETIME), registration.expiresAt());
+        assertEquals(List.of(registration), pending.registrations());
     }
 
     @Test
-    void announcesTheNewAccountSoAdministratorsAreTold() {
-        User user = register.register(command("ada@example.com", UseCaseFixtures.PASSWORD));
+    void createsNoAccountBeforeTheAddressIsVerified() {
+        register.register(command("ada@example.com", UseCaseFixtures.PASSWORD));
 
-        assertEquals(List.of(new AccountRegistered(user.idUser(), "ada@example.com", CLOCK.instant())),
-                events.eventsOf(AccountRegistered.class));
+        assertTrue(users.users().isEmpty());
     }
 
     @Test
-    void announcesNothingWhenTheRegistrationIsRefused() {
-        assertThrows(PasswordPolicyViolationException.class,
-                () -> register.register(command("ada@example.com", "short")));
+    void registeringAgainReplacesTheEarlierRequestAndItsIdentifier() {
+        PendingRegistration first = register.register(command("ada@example.com", UseCaseFixtures.PASSWORD));
+        PendingRegistration second = register.register(command("ADA@example.com", "StrongPass2!"));
 
-        assertTrue(events.events().isEmpty());
-    }
-
-    @Test
-    void recordsACreateAuditEntryPointingAtTheNewUser() {
-        User user = register.register(command("ada@example.com", UseCaseFixtures.PASSWORD));
-
-        assertEquals(1, audits.logs().size());
-        assertEquals(AuditAction.CREATE, audits.logs().getFirst().action());
-        assertEquals(user.idUser(), audits.logs().getFirst().idUser().orElseThrow());
+        assertEquals(List.of(second), pending.registrations());
+        // The code is derived from the identifier, so the first one stops working.
+        assertNotEquals(first.idUser(), second.idUser());
+        assertTrue(hasher.matches("StrongPass2!", second.passwordHash()));
     }
 
     @Test
     void rejectsPasswordBelowPolicy() {
-        PasswordPolicyViolationException error = assertThrows(
-                PasswordPolicyViolationException.class,
+        assertThrows(PasswordPolicyViolationException.class,
                 () -> register.register(command("ada@example.com", "weak")));
-        assertNotNull(error);
-        assertTrue(persons.findActive("id0000001").isEmpty());
-        assertTrue(users.findActive("id0000002").isEmpty());
+
+        assertTrue(pending.registrations().isEmpty());
     }
 
     @Test
-    void rejectsRegisteredEmail() {
-        register.register(command("ada@example.com", UseCaseFixtures.PASSWORD));
+    void rejectsAnAddressThatAlreadyHasAnAccount() {
+        users.seed("use0000001", "per0000001", "ada@example.com", UserStatus.ACTIVE);
 
-        EmailAlreadyRegisteredException error = assertThrows(
-                EmailAlreadyRegisteredException.class,
-                () -> register.register(command("ada@example.com", UseCaseFixtures.PASSWORD)));
-        assertNotNull(error);
-        assertEquals(1, users.users().size());
-    }
-
-    @Test
-    void normalisesEmailCaseBeforeUniquenessCheck() {
-        register.register(command("ada@example.com", UseCaseFixtures.PASSWORD));
-
-        EmailAlreadyRegisteredException error = assertThrows(
-                EmailAlreadyRegisteredException.class,
+        assertThrows(EmailAlreadyRegisteredException.class,
                 () -> register.register(command("ADA@Example.com", UseCaseFixtures.PASSWORD)));
-        assertNotNull(error);
-        assertEquals(1, users.users().size());
+        assertTrue(pending.registrations().isEmpty());
     }
 
     @Test
-    void refusesAnAddressWhoseDomainCannotReceiveMailAndCreatesNothing() {
-        deadDomains.add("gmial.con");
+    void refusesAnAddressWhoseDomainCannotReceiveMailAndKeepsNothing() {
+        deadDomains.add("correo-inventado.co");
 
         UndeliverableEmailException error = assertThrows(UndeliverableEmailException.class,
-                () -> register.register(command("Ana@Gmial.con", UseCaseFixtures.PASSWORD)));
+                () -> register.register(command("Ana@Correo-Inventado.co", UseCaseFixtures.PASSWORD)));
 
         assertTrue(error.getMessage().contains("cannot receive mail"));
-        assertEquals(List.of("gmial.con"), checkedDomains);
-        assertTrue(users.users().isEmpty());
-        assertTrue(persons.findActive("id0000001").isEmpty());
-        assertTrue(events.events().isEmpty());
+        assertEquals(List.of("correo-inventado.co"), checkedDomains);
+        assertTrue(pending.registrations().isEmpty());
+    }
+
+    @Test
+    void refusesAMistypedProviderEvenWhenItsDomainReceivesMail() {
+        // meil.com is registered and publishes mail servers: only the spelling gives it away.
+        UndeliverableEmailException error = assertThrows(UndeliverableEmailException.class,
+                () -> register.register(command("bspc1507@meil.com", UseCaseFixtures.PASSWORD)));
+
+        assertTrue(error.getMessage().contains("did you mean mail.com?"));
+        assertTrue(checkedDomains.isEmpty());
+        assertTrue(pending.registrations().isEmpty());
+    }
+
+    @Test
+    void acceptsTheProvidersThemselves() {
+        register.register(command("ada@gmail.com", UseCaseFixtures.PASSWORD));
+        register.register(command("grace@soy.sena.edu.co", UseCaseFixtures.PASSWORD));
+
+        assertEquals(2, pending.registrations().size());
+        assertEquals(List.of("gmail.com", "soy.sena.edu.co"), checkedDomains);
     }
 
     @Test

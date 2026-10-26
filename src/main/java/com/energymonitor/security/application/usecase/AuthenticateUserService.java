@@ -6,6 +6,7 @@ import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
 import com.energymonitor.security.application.port.out.LoginErrorLogPersistencePort;
 import com.energymonitor.security.application.port.out.PasswordHasherPort;
+import com.energymonitor.security.application.port.out.PendingRegistrationPersistencePort;
 import com.energymonitor.security.application.port.out.UserPersistencePort;
 import com.energymonitor.security.application.result.AuthenticatedUser;
 import com.energymonitor.security.application.result.AuthenticationResult;
@@ -24,22 +25,27 @@ import java.util.Optional;
  * Authenticates an account, recording every attempt in the typed error or audit trail.
  *
  * <p>An account that has not confirmed its email address cannot sign in: the right password
- * answers {@link AuthenticationStatus#EMAIL_NOT_VERIFIED} instead of a session.
+ * answers {@link AuthenticationStatus#EMAIL_NOT_VERIFIED} instead of a session. So does the right
+ * password of a registration still waiting for its code, which has no account yet.
  */
 public class AuthenticateUserService implements AuthenticateUser {
 
     private final UserPersistencePort userPort;
+    private final PendingRegistrationPersistencePort pendingPort;
     private final PasswordHasherPort passwordHasher;
     private final IdentifierGeneratorPort identifiers;
     private final AuditLogPersistencePort auditLogPort;
     private final LoginErrorLogPersistencePort loginErrorLogPort;
     private final Clock clock;
 
-    public AuthenticateUserService(UserPersistencePort userPort, PasswordHasherPort passwordHasher,
+    public AuthenticateUserService(UserPersistencePort userPort,
+                                   PendingRegistrationPersistencePort pendingPort,
+                                   PasswordHasherPort passwordHasher,
                                    IdentifierGeneratorPort identifiers,
                                    AuditLogPersistencePort auditLogPort,
                                    LoginErrorLogPersistencePort loginErrorLogPort, Clock clock) {
         this.userPort = userPort;
+        this.pendingPort = pendingPort;
         this.passwordHasher = passwordHasher;
         this.identifiers = identifiers;
         this.auditLogPort = auditLogPort;
@@ -50,7 +56,16 @@ public class AuthenticateUserService implements AuthenticateUser {
     @Override
     public AuthenticationResult authenticate(AuthenticateUserCommand command) {
         Instant now = clock.instant();
-        Optional<User> maybe = userPort.findActiveByEmail(Email.of(command.email()));
+        Email email = Email.of(command.email());
+        Optional<User> maybe = userPort.findActiveByEmail(email);
+        if (maybe.isEmpty() && waitsForVerification(email, command.rawPassword(), now)) {
+            // Registered but not verified yet, so there is no account: the owner, who knows the
+            // password, is told to verify, exactly as an account with an unverified address is.
+            // The trail records what the database holds, which is no account at all.
+            loginErrorLogPort.save(
+                    LoginErrorLog.userNotFound(identifiers.generate(), command.ipAddress(), now));
+            return new AuthenticationResult(AuthenticationStatus.EMAIL_NOT_VERIFIED, Optional.empty());
+        }
         if (maybe.isEmpty()) {
             loginErrorLogPort.save(
                     LoginErrorLog.userNotFound(identifiers.generate(), command.ipAddress(), now));
@@ -91,7 +106,14 @@ public class AuthenticateUserService implements AuthenticateUser {
                         user.profileImage().orElse(null))));
     }
 
-    private LoginErrorLog error(User user, LoginErrorType type, String ipAddress, Instant now) {
+    private boolean waitsForVerification(Email email, String rawPassword, Instant now) {
+        return pendingPort.findByEmail(email)
+                .filter(pending -> !pending.isExpiredAt(now))
+                .filter(pending -> passwordHasher.matches(rawPassword, pending.passwordHash()))
+                .isPresent();
+    }
+
+        private LoginErrorLog error(User user, LoginErrorType type, String ipAddress, Instant now) {
         return new LoginErrorLog(identifiers.generate(), user.idUser(), type, null, ipAddress, now);
     }
 }

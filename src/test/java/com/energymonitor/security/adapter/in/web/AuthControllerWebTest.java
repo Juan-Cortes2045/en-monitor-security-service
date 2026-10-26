@@ -42,6 +42,7 @@ import com.energymonitor.security.application.port.in.UpdateUserProfile;
 import com.energymonitor.security.application.result.AuthenticatedUser;
 import com.energymonitor.security.domain.model.Email;
 import com.energymonitor.security.domain.model.PasswordHash;
+import com.energymonitor.security.domain.model.PendingRegistration;
 import com.energymonitor.security.domain.model.Person;
 import com.energymonitor.security.domain.model.User;
 import com.energymonitor.security.domain.model.UserStatus;
@@ -129,6 +130,11 @@ class AuthControllerWebTest extends JwtKeyedTest {
                 Email.of(EMAIL), REGISTRATION, null);
     }
 
+    private static PendingRegistration newRegistration() {
+        return PendingRegistration.request("USR0000001", Email.of(EMAIL), "Ada", "Lovelace",
+                PasswordHash.of("$2a$10$abcdefghij"), null, "10.0.0.1", REGISTRATION);
+    }
+
     private static AuthenticatedUser identity() {
         return new AuthenticatedUser("USR0000001", "PER0000001", Email.of(EMAIL),
                 UserStatus.ACTIVE, Instant.now(), null);
@@ -149,40 +155,40 @@ class AuthControllerWebTest extends JwtKeyedTest {
     // ---------------------------------------------------------------- registration
 
     @Test
-    void registersAnAccountAndAnswers201() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+    void acceptsARegistrationAndAnswers202WithoutAnAccount() throws Exception {
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.idUser").value("USR0000001"))
-                .andExpect(jsonPath("$.idPerson").value("PER0000001"))
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.email").value(EMAIL))
-                .andExpect(jsonPath("$.status").value("ACTIVE"));
+                .andExpect(jsonPath("$.expiresAt").exists())
+                .andExpect(jsonPath("$.idUser").doesNotExist())
+                .andExpect(jsonPath("$.status").doesNotExist());
     }
 
     @Test
-    void sendsTheVerificationCodeOnceTheAccountIsCreated() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+    void sendsTheVerificationCodeOnceTheRegistrationIsKept() throws Exception {
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
 
         verify(emailVerification).sendCode(EMAIL);
     }
 
     @Test
-    void stillAnswers201WhenTheVerificationCodeCannotBeSent() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+    void stillAnswers202WhenTheVerificationCodeCannotBeSent() throws Exception {
+        given(registerUser.register(any())).willReturn(newRegistration());
         willThrow(new IllegalStateException("smtp down")).given(emailVerification).sendCode(anyString());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
     }
 
     // ---------------------------------------------------------------- account
@@ -288,24 +294,24 @@ class AuthControllerWebTest extends JwtKeyedTest {
 
     @Test
     void passesTheSubmittedFieldsAndTheCallerAddressToTheUseCase() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
 
         verify(registerUser).register(any(RegisterUserCommand.class));
     }
 
     @Test
     void neverReturnsThePasswordHashOnRegistration() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         String body = mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
 
         org.junit.jupiter.api.Assertions.assertFalse(body.contains("passwordHash"),
@@ -749,12 +755,12 @@ class AuthControllerWebTest extends JwtKeyedTest {
     @Test
     void leavesRegistrationReachableWithoutAToken() throws Exception {
         // The permit list is what makes sign-up possible at all: a caller has no identity yet.
-        given(registerUser.register(any())).willReturn(newAccount());
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
     }
 
     @Test
