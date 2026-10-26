@@ -57,9 +57,15 @@ public class UpdateUserProfileService implements UpdateUserProfile {
         // Saved once, after every personal attribute has been applied. Saving inside each branch
         // would persist the person when only one field changed, and skip it entirely when the
         // other did, which is how a rename used to be lost.
+        // Each half of the name on its own: a client edits one field at a time, and an account
+        // created from Google may have no last name to send back.
         boolean personChanged = false;
-        if (command.name() != null && command.lastName() != null) {
-            person.rename(command.name(), command.lastName());
+        if (command.name() != null) {
+            person.changeName(command.name());
+            personChanged = true;
+        }
+        if (command.lastName() != null) {
+            person.changeLastName(command.lastName());
             personChanged = true;
         }
         if (personChanged) {

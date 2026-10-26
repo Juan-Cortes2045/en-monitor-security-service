@@ -17,10 +17,10 @@ import jakarta.validation.constraints.Size;
  * mistaken for a credential or be re-used as one. Changing it resets email verification, so a
  * client must expect to confirm the new address before treating it as usable.
  *
- * <p><strong>Why the name is a pair.</strong> A person is required to have both a first name and
- * a last name (INV-001), and the aggregate replaces them together. Sending one of the two
- * therefore leaves both of them as they were, which is why the endpoint documents "both or
- * neither" rather than advertising two independently editable fields it cannot honour.
+ * <p><strong>The two halves of the name are independent.</strong> {@code name} alone renames the
+ * first name and keeps the last name, and the other way round. The first name is required, so a
+ * blank one is refused; the last name is optional (an account created from Google may have
+ * none), so a blank one removes it.
  *
  * <p><strong>There is no phone number here.</strong> The field existed once and was removed from
  * the domain, from the {@code person} table and from the registration body before this endpoint
@@ -30,8 +30,8 @@ import jakarta.validation.constraints.Size;
  * the server stores nothing. Adding the field back would mean re-adding the column, and this
  * record is deliberately shaped so that doing so cannot happen by accident.
  *
- * @param name         new first name, {@code null} to keep
- * @param lastName     new last name, {@code null} to keep
+ * @param name         new first name, {@code null} to keep; blank is refused
+ * @param lastName     new last name, {@code null} to keep, blank to remove it
  * @param profileImage new avatar (URL or data URL), blank to remove it, {@code null} to keep
  * @param newEmail     address to move the account to, {@code null} to keep
  */
