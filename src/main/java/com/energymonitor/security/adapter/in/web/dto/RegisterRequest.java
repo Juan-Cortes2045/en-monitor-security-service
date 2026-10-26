@@ -15,11 +15,19 @@ import jakarta.validation.constraints.Size;
  * @param name         first name
  * @param lastName     last name
  * @param profileImage optional profile image location
+ * @param acceptTerms  {@code true} when the person accepted the terms and conditions; without
+ *                     it the registration answers 428
  */
 public record RegisterRequest(
         @NotBlank @Size(max = 255) String email,
         @NotBlank @Size(max = 255) String password,
         @NotBlank @Size(max = 100) String name,
         @NotBlank @Size(max = 100) String lastName,
-        @Size(max = 255) String profileImage) {
+        @Size(max = 255) String profileImage,
+        Boolean acceptTerms) {
+
+    /** @return whether the terms are accepted with this request */
+    public boolean acceptsTerms() {
+        return Boolean.TRUE.equals(acceptTerms);
+    }
 }

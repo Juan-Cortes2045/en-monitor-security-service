@@ -104,6 +104,7 @@ public final class UseCaseFixtures {
         public User seed(String idUser, String idPerson, String email, UserStatus status) {
             User user = new User(idUser, idPerson, PasswordHash.of("hash:" + PASSWORD),
                     Email.of(email), true, REGISTRATION, status, 0, null, null);
+            user.acceptTerms(REGISTRATION);
             byId.put(idUser, user);
             return user;
         }

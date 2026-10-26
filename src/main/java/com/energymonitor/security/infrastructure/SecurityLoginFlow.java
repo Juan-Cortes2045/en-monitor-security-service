@@ -1,6 +1,7 @@
 package com.energymonitor.security.infrastructure;
 
 import com.energymonitor.security.application.exception.EmailNotVerifiedException;
+import com.energymonitor.security.application.exception.TermsNotAcceptedException;
 import com.energymonitor.security.application.exception.GoogleSignInUnavailableException;
 import com.energymonitor.security.application.port.in.SignInWithGoogle;
 import com.energymonitor.security.application.port.out.GoogleIdentityPort;
@@ -97,15 +98,21 @@ public class SecurityLoginFlow {
      * @param ipAddress   the caller's address, recorded in the audit or error trail
      * @param userAgent   the caller's user agent, stored with the session
      * @return the issued credentials, or empty when the attempt was rejected
+     * @param acceptTerms whether the caller accepts the terms now, for an account that never did
      * @throws EmailNotVerifiedException when the password is right but the address is not
      *                                   confirmed yet
+     * @throws TermsNotAcceptedException when the account never accepted the terms and the
+     *                                   attempt does not accept them
      */
-    public Optional<LoginOutcome> login(String email, String rawPassword, String ipAddress,
-                                        String userAgent) {
+    public Optional<LoginOutcome> login(String email, String rawPassword, boolean acceptTerms,
+                                        String ipAddress, String userAgent) {
         var result = authenticateUser.authenticate(
-                new AuthenticateUserCommand(email, rawPassword, ipAddress));
+                new AuthenticateUserCommand(email, rawPassword, ipAddress, acceptTerms));
         if (result.status() == AuthenticationStatus.EMAIL_NOT_VERIFIED) {
             throw new EmailNotVerifiedException("email address not verified");
+        }
+        if (result.status() == AuthenticationStatus.TERMS_NOT_ACCEPTED) {
+            throw new TermsNotAcceptedException("Accept the terms and conditions to sign in.");
         }
         if (!result.isSuccess()) {
             return Optional.empty();
@@ -120,10 +127,10 @@ public class SecurityLoginFlow {
      * @return empty when the code is invalid or Google did not verify the address
      * @throws GoogleSignInUnavailableException when no Google client is configured
      */
-    public Optional<LoginOutcome> loginWithGoogle(String authorizationCode, String ipAddress,
-                                                  String userAgent) {
+    public Optional<LoginOutcome> loginWithGoogle(String authorizationCode, boolean acceptTerms,
+                                                  String ipAddress, String userAgent) {
         requireGoogle();
-        return signInAs(google.exchange(authorizationCode), ipAddress, userAgent);
+        return signInAs(google.exchange(authorizationCode), acceptTerms, ipAddress, userAgent);
     }
 
     /**
@@ -134,10 +141,10 @@ public class SecurityLoginFlow {
      * @return empty when the token is invalid or Google did not verify the address
      * @throws GoogleSignInUnavailableException when no Google client is configured
      */
-    public Optional<LoginOutcome> loginWithGoogleIdToken(String idToken, String ipAddress,
-                                                         String userAgent) {
+    public Optional<LoginOutcome> loginWithGoogleIdToken(String idToken, boolean acceptTerms,
+                                                         String ipAddress, String userAgent) {
         requireGoogle();
-        return signInAs(google.verify(idToken), ipAddress, userAgent);
+        return signInAs(google.verify(idToken), acceptTerms, ipAddress, userAgent);
     }
 
     private void requireGoogle() {
@@ -147,9 +154,10 @@ public class SecurityLoginFlow {
     }
 
     private Optional<LoginOutcome> signInAs(Optional<GoogleIdentity> googleIdentity,
-                                            String ipAddress, String userAgent) {
+                                            boolean acceptTerms, String ipAddress,
+                                            String userAgent) {
         return googleIdentity
-                .flatMap(identity -> signInWithGoogle.signIn(identity, ipAddress))
+                .flatMap(identity -> signInWithGoogle.signIn(identity, ipAddress, acceptTerms))
                 .map(identity -> open(identity, ipAddress, userAgent));
     }
 

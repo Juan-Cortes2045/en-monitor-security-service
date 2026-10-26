@@ -3,6 +3,7 @@ package com.energymonitor.security.application.usecase;
 import com.energymonitor.security.application.command.RegisterUserCommand;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
 import com.energymonitor.security.application.exception.PasswordPolicyViolationException;
+import com.energymonitor.security.application.exception.TermsNotAcceptedException;
 import com.energymonitor.security.application.port.in.RegisterUser;
 import com.energymonitor.security.application.port.out.EmailDomainCheckPort;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
@@ -22,7 +23,8 @@ import java.time.Clock;
  * {@link EmailVerificationService} when the code sent to the address comes back, so an address
  * nobody reads never becomes an account. Registering again with the same address replaces the
  * earlier request (a mistyped password can be fixed that way) and invalidates its code, which is
- * derived from the identifier the request reserves.
+ * derived from the identifier the request reserves. The terms and conditions have to be accepted:
+ * the request records that they were, at the instant it was made.
  */
 public class RegisterUserService implements RegisterUser {
 
@@ -52,6 +54,9 @@ public class RegisterUserService implements RegisterUser {
     @Override
     public PendingRegistration register(RegisterUserCommand command) {
         Email email = Email.of(command.email());
+        if (!command.acceptTerms()) {
+            throw new TermsNotAcceptedException("Accept the terms and conditions to register.");
+        }
         PasswordPolicy policy = passwordPolicyPort.activePolicy()
                 .orElseThrow(() -> new IllegalStateException("no active password policy is configured"));
         if (!policy.isSatisfiedBy(command.rawPassword())) {

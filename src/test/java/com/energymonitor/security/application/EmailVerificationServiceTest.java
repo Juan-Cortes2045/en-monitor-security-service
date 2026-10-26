@@ -170,6 +170,7 @@ class EmailVerificationServiceTest {
         assertThat(account.email().value()).isEqualTo(EMAIL);
         assertThat(account.isEmailVerified()).isTrue();
         assertThat(account.status()).isEqualTo(UserStatus.ACTIVE);
+        assertThat(account.termsAcceptedAt()).contains(NOW);
         assertThat(account.passwordHash()).isEqualTo(PasswordHash.of("hash:secret"));
         assertThat(persons.findActive(account.idPerson()).orElseThrow().name()).isEqualTo("Ada");
         assertThat(audits.logs()).singleElement()
