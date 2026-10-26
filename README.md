@@ -145,9 +145,9 @@ Before changing anything the service asks the home service whether the account m
 (`GET /internal/accounts/{id}/deletion-check`). If the account is the only owner of a home that
 still has other members, the request is refused with `409` and the home service's readable
 `message`: the ownership must be handed over or the members removed first. If the home service
-does not answer,
-the answer is `503` and nothing is deleted. Once deleted, `account.deleted` tells the backend to
-drop the memberships and the homes nobody else is left in. An access token issued before the
+does not answer, the answer is `503` and nothing is deleted. Once deleted, `account.deleted` tells
+the home service to drop the memberships and the homes nobody else is left in, and the backend to
+drop the account's notification preferences and devices. An access token issued before the
 deletion keeps working until it expires, at most 15 minutes; no refresh token can renew it.
 
 ### Administrators and global roles (RBAC)
