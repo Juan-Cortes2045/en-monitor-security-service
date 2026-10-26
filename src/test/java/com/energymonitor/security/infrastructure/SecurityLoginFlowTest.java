@@ -315,4 +315,44 @@ class SecurityLoginFlowTest {
         assertEquals("the-refresh-token", outcome.orElseThrow().refreshToken());
         assertEquals("USR0000001", outcome.orElseThrow().account().idUser());
     }
+
+    @Test
+    void googleIdTokensAreUnavailableWithoutAClient() {
+        given(google.isConfigured()).willReturn(false);
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.energymonitor.security.application.exception.GoogleSignInUnavailableException.class,
+                () -> flow.loginWithGoogleIdToken("token", "10.0.0.1", "JUnit"));
+        verify(google, never()).verify(any());
+    }
+
+    @Test
+    void anInvalidGoogleIdTokenOpensNoSession() {
+        given(google.isConfigured()).willReturn(true);
+        given(google.verify("forged")).willReturn(Optional.empty());
+
+        assertTrue(flow.loginWithGoogleIdToken("forged", "10.0.0.1", "JUnit").isEmpty());
+        verify(signInWithGoogle, never()).signIn(any(), any());
+        verify(createUserSession, never()).create(any());
+    }
+
+    @Test
+    void aValidGoogleIdTokenOpensTheUsualSessionWithoutExchangingACode() {
+        var googleIdentity = new com.energymonitor.security.application.result.GoogleIdentity(
+                "g-1", "someone@example.com", true, "Some", "One", "Some One", null);
+        given(google.isConfigured()).willReturn(true);
+        given(google.verify("good-token")).willReturn(Optional.of(googleIdentity));
+        given(signInWithGoogle.signIn(googleIdentity, "10.0.0.1")).willReturn(Optional.of(identity()));
+        given(createUserSession.create(any())).willReturn(session());
+        given(secrets.generateToken()).willReturn("the-refresh-token");
+        given(identifiers.generate()).willReturn("rft0000001");
+        given(hasher.hash("the-refresh-token")).willReturn("hash-of-the-refresh-token");
+
+        var outcome = flow.loginWithGoogleIdToken("good-token", "10.0.0.1", "JUnit");
+
+        assertTrue(outcome.isPresent());
+        assertEquals("the-refresh-token", outcome.orElseThrow().refreshToken());
+        assertEquals("USR0000001", outcome.orElseThrow().account().idUser());
+        verify(google, never()).exchange(any());
+    }
 }

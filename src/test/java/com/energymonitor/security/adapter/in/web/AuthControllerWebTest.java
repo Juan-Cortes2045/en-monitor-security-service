@@ -424,6 +424,41 @@ class AuthControllerWebTest extends JwtKeyedTest {
     }
 
     @Test
+    void theMobileAppSignsInWithGoogleWithAnIdToken() throws Exception {
+        given(loginFlow.loginWithGoogleIdToken(eq("eyJ.mobile.token"), any(), any()))
+                .willReturn(Optional.of(new SecurityLoginFlow.LoginOutcome("access-token",
+                        "refresh-token", 900L, identity(), "SES0000001")));
+
+        mvc.perform(post("/api/v1/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"idToken":"eyJ.mobile.token"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").value("access-token"))
+                .andExpect(jsonPath("$.refreshToken").value("refresh-token"));
+        verify(loginFlow, never()).loginWithGoogle(any(), any(), any());
+    }
+
+    @Test
+    void anInvalidGoogleIdTokenIsUnauthorized() throws Exception {
+        given(loginFlow.loginWithGoogleIdToken(any(), any(), any())).willReturn(Optional.empty());
+
+        mvc.perform(post("/api/v1/auth/google").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idToken\":\"forged\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void aGoogleRequestWithBothCredentialsIsRefused() throws Exception {
+        mvc.perform(post("/api/v1/auth/google").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"4/0Ab\",\"idToken\":\"eyJ\"}"))
+                .andExpect(status().isBadRequest());
+        verify(loginFlow, never()).loginWithGoogle(any(), any(), any());
+        verify(loginFlow, never()).loginWithGoogleIdToken(any(), any(), any());
+    }
+
+    @Test
     void refusesToSignInUntilTheAddressIsVerified() throws Exception {
         given(loginFlow.login(any(), any(), any(), any()))
                 .willThrow(new com.energymonitor.security.application.exception.EmailNotVerifiedException("not verified"));
