@@ -1,4 +1,4 @@
-package com.energymonitor.security.adapter.out.backend;
+package com.energymonitor.security.adapter.out.home;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -23,29 +23,29 @@ import org.springframework.web.client.RestClient;
 @DisplayName("Account deletion guard over HTTP")
 class HttpAccountDeletionGuardTest {
 
-    private static final String CHECK = "http://backend/internal/accounts/use0000001/deletion-check";
+    private static final String CHECK = "http://home/internal/accounts/use0000001/deletion-check";
 
     private final RestClient.Builder builder = RestClient.builder()
-            .baseUrl("http://backend")
+            .baseUrl("http://home")
             .defaultHeader("X-Internal-Token", "secret");
-    private final MockRestServiceServer backend = MockRestServiceServer.bindTo(builder).build();
+    private final MockRestServiceServer homeService = MockRestServiceServer.bindTo(builder).build();
     private final HttpAccountDeletionGuard guard = new HttpAccountDeletionGuard(builder.build());
 
     @Test
     @DisplayName("204 lets the deletion go ahead")
     void allowed() {
-        backend.expect(requestTo(CHECK)).andExpect(method(HttpMethod.GET))
+        homeService.expect(requestTo(CHECK)).andExpect(method(HttpMethod.GET))
                 .andExpect(header("X-Internal-Token", "secret"))
                 .andRespond(withStatus(HttpStatus.NO_CONTENT));
 
         assertThatCode(() -> guard.ensureDeletable("use0000001")).doesNotThrowAnyException();
-        backend.verify();
+        homeService.verify();
     }
 
     @Test
-    @DisplayName("409 refuses it with the backend's message")
+    @DisplayName("409 refuses it with the home service's message")
     void blocked() {
-        backend.expect(requestTo(CHECK)).andRespond(withStatus(HttpStatus.CONFLICT)
+        homeService.expect(requestTo(CHECK)).andRespond(withStatus(HttpStatus.CONFLICT)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body("{\"message\":\"Transfer the ownership first.\"}"));
 
@@ -57,7 +57,7 @@ class HttpAccountDeletionGuardTest {
     @Test
     @DisplayName("409 without a message still refuses it")
     void blockedWithoutMessage() {
-        backend.expect(requestTo(CHECK)).andRespond(withStatus(HttpStatus.CONFLICT)
+        homeService.expect(requestTo(CHECK)).andRespond(withStatus(HttpStatus.CONFLICT)
                 .contentType(MediaType.APPLICATION_JSON).body("{}"));
 
         assertThatThrownBy(() -> guard.ensureDeletable("use0000001"))
@@ -68,16 +68,16 @@ class HttpAccountDeletionGuardTest {
     @Test
     @DisplayName("a server error is no answer")
     void serverError() {
-        backend.expect(requestTo(CHECK)).andRespond(withServerError());
+        homeService.expect(requestTo(CHECK)).andRespond(withServerError());
 
         assertThatThrownBy(() -> guard.ensureDeletable("use0000001"))
                 .isInstanceOf(AccountDeletionCheckUnavailableException.class);
     }
 
     @Test
-    @DisplayName("an unreachable backend is no answer")
+    @DisplayName("an unreachable home service is no answer")
     void unreachable() {
-        backend.expect(requestTo(CHECK)).andRespond(withException(new IOException("refused")));
+        homeService.expect(requestTo(CHECK)).andRespond(withException(new IOException("refused")));
 
         assertThatThrownBy(() -> guard.ensureDeletable("use0000001"))
                 .isInstanceOf(AccountDeletionCheckUnavailableException.class);
@@ -86,7 +86,7 @@ class HttpAccountDeletionGuardTest {
     @Test
     @DisplayName("a refused token is no answer, not a permission to delete")
     void forbidden() {
-        backend.expect(requestTo(CHECK)).andRespond(withStatus(HttpStatus.FORBIDDEN));
+        homeService.expect(requestTo(CHECK)).andRespond(withStatus(HttpStatus.FORBIDDEN));
 
         assertThatThrownBy(() -> guard.ensureDeletable("use0000001"))
                 .isInstanceOf(AccountDeletionCheckUnavailableException.class);
