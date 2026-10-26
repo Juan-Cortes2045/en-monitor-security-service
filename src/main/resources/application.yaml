@@ -65,9 +65,9 @@ internal-api:
   # Generate with: openssl rand -hex 32
   token: ${INTERNAL_API_TOKEN:}
   allowed-networks: ${INTERNAL_API_ALLOWED_NETWORKS:127.0.0.1/32,::1/128,172.16.0.0/12}
-  # Asked before deleting an account (GET /internal/accounts/{id}/deletion-check). No answer
-  # within the timeouts refuses the deletion with 503.
-  backend-url: ${BACKEND_INTERNAL_URL:http://localhost:8083}
+  # The home service, asked before deleting an account (GET /internal/accounts/{id}/deletion-check).
+  # No answer within the timeouts refuses the deletion with 503.
+  home-service-url: ${HOME_SERVICE_URL:http://localhost:8086}
   connect-timeout: PT1S
   read-timeout: PT2S
 
