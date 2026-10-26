@@ -131,7 +131,7 @@ configured every internal call is refused. The API gateway never forwards `/inte
 | backend → security | `GET /internal/users/{id}/permissions` | `{permissions: [...]}`; 404 without an active account |
 | backend → security | `POST /internal/users/profiles` `{userIds}` (≤ 500) | `{profiles: [{userId, name, lastName, email}]}`, active accounts only |
 | backend → security | `GET /internal/administrators` | `{userIds: [...]}` |
-| security → backend | `GET /internal/accounts/{id}/deletion-check` | 204 may delete; 409 `{message}` refused |
+| security → home service | `GET /internal/accounts/{id}/deletion-check` | 204 may delete; 409 `{message}` refused |
 
 - **Deleting an account.** The use case asks the deletion check after verifying the password and
   before changing anything. A 409 is returned to the user as is; no answer within 1 s to connect

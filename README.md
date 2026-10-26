@@ -40,7 +40,7 @@ It does not start without the RSA key pair or the pepper.
 `INTERNAL_API_TOKEN` must be the value of energy-monitor-backend: it protects the internal calls
 between both (see [docs/Architecture.md](docs/Architecture.md#internal-api)). Without it the
 backend cannot ask for permissions or profiles, and deleting an account answers 503 because the
-backend refuses the deletion check (`BACKEND_INTERNAL_URL`).
+home service refuses the deletion check (`HOME_SERVICE_URL`).
 
 ## RSA key pair
 
@@ -141,10 +141,11 @@ checking the password (`401` when it is wrong, `204` when done). It is a soft de
 deleted row keeps `deleted+<id_user>@deleted.invalid` instead, so the same address can register a
 new account.
 
-Before changing anything the service asks energy-monitor-backend whether the account may go
+Before changing anything the service asks the home service whether the account may go
 (`GET /internal/accounts/{id}/deletion-check`). If the account is the only owner of a home that
-still has other members, the request is refused with `409` and the backend's readable `message`:
-the ownership must be handed over or the members removed first. If the backend does not answer,
+still has other members, the request is refused with `409` and the home service's readable
+`message`: the ownership must be handed over or the members removed first. If the home service
+does not answer,
 the answer is `503` and nothing is deleted. Once deleted, `account.deleted` tells the backend to
 drop the memberships and the homes nobody else is left in. An access token issued before the
 deletion keeps working until it expires, at most 15 minutes; no refresh token can renew it.
