@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.energymonitor.security.application.command.ChangeUserStatusCommand;
 import com.energymonitor.security.application.command.UpdateUserProfileCommand;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
+import com.energymonitor.security.application.exception.UndeliverableEmailException;
 import com.energymonitor.security.application.usecase.FindUserService;
 import com.energymonitor.security.application.usecase.ManageUserStatusService;
 import com.energymonitor.security.application.usecase.UpdateUserProfileService;
@@ -36,7 +37,8 @@ class AccountLifecycleServiceTest {
             new UseCaseFixtures.FakeIdentifierGeneratorPort();
     private final FindUserService findUser = new FindUserService(users);
     private final UpdateUserProfileService updateProfile =
-            new UpdateUserProfileService(users, persons, audits, identifiers, CLOCK);
+            new UpdateUserProfileService(users, persons, audits, identifiers,
+                    domain -> !"nowhere.invalid".equals(domain), CLOCK);
     private final ManageUserStatusService manageStatus =
             new ManageUserStatusService(users, audits, identifiers, CLOCK);
 
@@ -143,6 +145,29 @@ class AccountLifecycleServiceTest {
         assertThrows(EmailAlreadyRegisteredException.class,
                 () -> updateProfile.update(new UpdateUserProfileCommand("use0000001",
                         null, null, null, "taken@example.com", null)));
+    }
+
+    @Test
+    void refusesChangingTheEmailToAMistypedProvider() {
+        seedAda();
+
+        UndeliverableEmailException error = assertThrows(UndeliverableEmailException.class,
+                () -> updateProfile.update(new UpdateUserProfileCommand("use0000001",
+                        null, null, null, "ada@meil.com", null)));
+
+        assertTrue(error.getMessage().contains("did you mean mail.com?"));
+        assertEquals("ada@example.com", users.findActive("use0000001").orElseThrow().email().value());
+    }
+
+    @Test
+    void refusesChangingTheEmailToADomainThatCannotReceiveMail() {
+        seedAda();
+
+        assertThrows(UndeliverableEmailException.class,
+                () -> updateProfile.update(new UpdateUserProfileCommand("use0000001",
+                        null, null, null, "ada@nowhere.invalid", null)));
+
+        assertEquals("ada@example.com", users.findActive("use0000001").orElseThrow().email().value());
     }
 
     @Test

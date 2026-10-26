@@ -17,6 +17,7 @@ import com.energymonitor.security.adapter.in.web.dto.ProfileResponse;
 import com.energymonitor.security.adapter.in.web.dto.RefreshRequest;
 import com.energymonitor.security.adapter.in.web.dto.RefreshResponse;
 import com.energymonitor.security.adapter.in.web.dto.RegisterRequest;
+import com.energymonitor.security.adapter.in.web.dto.RegistrationResponse;
 import com.energymonitor.security.adapter.in.web.dto.ResendVerificationRequest;
 import com.energymonitor.security.adapter.in.web.dto.ResetPasswordRequest;
 import com.energymonitor.security.adapter.in.web.dto.UpdateProfileRequest;
@@ -178,33 +179,33 @@ public class AuthController {
     }
 
     /**
-     * Registers an account. Open by design: a caller has no identity yet.
+     * Asks for an account. Open by design: a caller has no identity yet.
      *
      * @param request the registration body
      * @param servlet used only for the caller's address
-     * @return the created account, without its password hash
+     * @return the address the code was sent to and when the request expires
      */
     @Operation(summary = "Register an account",
-            description = "Creates an account from the supplied email, password and name, and "
-                    + "returns the created account without any credential field. Open by "
-                    + "design: a caller has no identity yet, so there is nothing to "
-                    + "authenticate.")
+            description = "Validates the supplied email, password and name, keeps them as a "
+                    + "registration waiting for its verification code and mails the code. No "
+                    + "account exists until POST /auth/email/verify confirms the code: an "
+                    + "address nobody reads never becomes an account, and its registration is "
+                    + "forgotten after 24 hours. Registering again with the same address "
+                    + "replaces the earlier registration and sends a new code. Open by design: a "
+                    + "caller has no identity yet, so there is nothing to authenticate.")
     @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "Account created",
+            @ApiResponse(responseCode = "202", description = "Registration accepted; the code "
+                    + "was sent to the address",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = AccountResponse.class),
+                            schema = @Schema(implementation = RegistrationResponse.class),
                             examples = @ExampleObject(value = """
                                     {
-                                      "idUser": "USR-1a2b3c4d5e",
-                                      "idPerson": "PER-9f8e7d6c5b",
                                       "email": "ada@example.com",
-                                      "status": "ACTIVE",
-                                      "lastLogin": null,
-                                      "profileImage": null
+                                      "expiresAt": "2026-10-27T15:04:05Z"
                                     }"""))),
             @ApiResponse(responseCode = "400", description = "Validation error: the body is "
-                    + "missing a field, the email is malformed, or its domain does not exist or "
-                    + "cannot receive mail (no MX nor address record)",
+                    + "missing a field, the email is malformed, its domain looks like a "
+                    + "mistyped provider, or it does not exist or cannot receive mail",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class))),
             @ApiResponse(responseCode = "409", description = "An account already exists for "
@@ -217,24 +218,25 @@ public class AuthController {
                             schema = @Schema(implementation = ApiError.class)))
     })
     @PostMapping("/register")
-    public ResponseEntity<AccountResponse> register(@Valid @RequestBody RegisterRequest request,
-                                                    HttpServletRequest servlet) {
-        var account = registerUser.register(new RegisterUserCommand(request.email(),
+    public ResponseEntity<RegistrationResponse> register(@Valid @RequestBody RegisterRequest request,
+                                                         HttpServletRequest servlet) {
+        var registration = registerUser.register(new RegisterUserCommand(request.email(),
                 request.password(), request.name(), request.lastName(),
                 request.profileImage(), clientIp(servlet)));
-        // After the account is committed, and never able to fail the registration: a mail outage
-        // must not leave a created account behind a 500. The client can ask for a new code.
+        // After the registration is committed, and never able to fail it: a mail outage must not
+        // answer 500 for a registration that was kept. The client can ask for a new code.
         try {
-            emailVerification.sendCode(account.email().value());
+            emailVerification.sendCode(registration.email().value());
         } catch (RuntimeException undeliverable) {
-            LOG.warn("The verification code for a new account could not be sent", undeliverable);
+            LOG.warn("The verification code for a new registration could not be sent", undeliverable);
         }
-        return ResponseEntity.status(HttpStatus.CREATED).body(AccountResponse.from(account));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(RegistrationResponse.from(registration));
     }
 
     @Operation(summary = "Verify the account's email",
-            description = "Checks the six-digit code sent to the address at registration and "
-                    + "marks the address as verified. An unknown address and a wrong or expired "
+            description = "Checks the six-digit code sent to the address. For a registration, "
+                    + "this is when the account is created, already verified; for an account "
+                    + "whose address changed, it marks the address as verified. An unknown address and a wrong or expired "
                     + "code produce the same 400, so the endpoint cannot be used to learn which "
                     + "addresses are registered. Repeating it with a valid code is harmless.")
     @ApiResponses({

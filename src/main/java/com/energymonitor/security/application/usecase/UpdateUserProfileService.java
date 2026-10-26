@@ -5,6 +5,7 @@ import com.energymonitor.security.application.exception.EmailAlreadyRegisteredEx
 import com.energymonitor.security.application.exception.UserNotFoundException;
 import com.energymonitor.security.application.port.in.UpdateUserProfile;
 import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
+import com.energymonitor.security.application.port.out.EmailDomainCheckPort;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
 import com.energymonitor.security.application.port.out.PersonPersistencePort;
 import com.energymonitor.security.application.port.out.UserPersistencePort;
@@ -30,15 +31,18 @@ public class UpdateUserProfileService implements UpdateUserProfile {
     private final PersonPersistencePort personPort;
     private final AuditLogPersistencePort auditLogPort;
     private final IdentifierGeneratorPort identifiers;
+    private final EmailDomainCheckPort emailDomains;
     private final Clock clock;
 
     public UpdateUserProfileService(UserPersistencePort userPort, PersonPersistencePort personPort,
                                     AuditLogPersistencePort auditLogPort,
-                                    IdentifierGeneratorPort identifiers, Clock clock) {
+                                    IdentifierGeneratorPort identifiers,
+                                    EmailDomainCheckPort emailDomains, Clock clock) {
         this.userPort = userPort;
         this.personPort = personPort;
         this.auditLogPort = auditLogPort;
         this.identifiers = identifiers;
+        this.emailDomains = emailDomains;
         this.clock = clock;
     }
 
@@ -71,6 +75,11 @@ public class UpdateUserProfileService implements UpdateUserProfile {
                     throw new EmailAlreadyRegisteredException("an account already exists for " + newEmail);
                 }
             });
+            // The same checks as registration: the new address has to receive its verification
+            // code. Keeping the current address untouched needs no lookup.
+            if (!newEmail.equals(user.email())) {
+                DeliverableEmail.require(newEmail, emailDomains);
+            }
             user.changeEmail(newEmail);
             accountChanged = true;
         }

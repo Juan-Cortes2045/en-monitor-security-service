@@ -28,7 +28,9 @@ spring:
     username: ${RABBITMQ_USERNAME:energy-monitor}
     password: ${RABBITMQ_PASSWORD:}
     # A message is marked as published only after the broker confirms it and a queue took it.
-    publisher-confirm-type: simple
+    # Correlated, not simple: the publisher reads the return from the correlation data, which is
+    # set before the confirmation completes (see RabbitOutboxPublisher).
+    publisher-confirm-type: correlated
     publisher-returns: true
     template:
       mandatory: true
