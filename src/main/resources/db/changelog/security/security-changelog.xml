@@ -38,6 +38,7 @@
     <include file="changes/security-026-create-security-outbox.xml" relativeToChangelogFile="true"/>
     <include file="changes/security-027-login-error-email-not-verified.xml" relativeToChangelogFile="true"/>
     <include file="changes/security-028-create-pending-registration.xml" relativeToChangelogFile="true"/>
+    <include file="changes/security-029-add-user-terms-accepted-at.xml" relativeToChangelogFile="true"/>
     
 
 </databaseChangeLog>

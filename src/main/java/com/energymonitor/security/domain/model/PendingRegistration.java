@@ -79,11 +79,15 @@ public final class PendingRegistration {
         return new Person(idPerson, name, lastName);
     }
 
-    /** @return the account, active and with its address already verified */
+    /**
+     * @return the account, active, with its address already verified and the terms accepted when
+     *         the request was made (registering requires accepting them)
+     */
     public User toUser(Person person, Instant createdAt) {
         User user = User.register(idUser, person.idPerson(), passwordHash, email, createdAt,
                 profileImage);
         user.verifyEmail();
+        user.acceptTerms(requestedAt);
         return user;
     }
 

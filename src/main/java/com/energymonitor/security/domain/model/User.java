@@ -29,6 +29,7 @@ public class User {
     private Instant lastLoginAt;
     private String profileImage;
     private String googleSubject;
+    private Instant termsAcceptedAt;
 
     /**
      * Rehydrates or registers an account. Prefer {@link #register} for new accounts.
@@ -155,6 +156,26 @@ public class User {
     /** Binds the account to a Google account; done once, when it is created from Google. */
     public void bindGoogleAccount(String subject) {
         this.googleSubject = Preconditions.optionalText(subject, 255, "googleSubject");
+    }
+
+    /**
+     * When the owner accepted the terms and conditions. No account signs in without it: an
+     * account created with Google before acceptance was required has none until its next sign-in.
+     */
+    public Optional<Instant> termsAcceptedAt() {
+        return Optional.ofNullable(termsAcceptedAt);
+    }
+
+    /** @return whether the terms and conditions were accepted */
+    public boolean hasAcceptedTerms() {
+        return termsAcceptedAt != null;
+    }
+
+    /** Records the acceptance of the terms; the first acceptance is the one kept. */
+    public void acceptTerms(Instant acceptedAt) {
+        if (termsAcceptedAt == null) {
+            this.termsAcceptedAt = Preconditions.notNull(acceptedAt, "termsAcceptedAt");
+        }
     }
 
     public Optional<String> profileImage() {

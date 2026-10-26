@@ -2,6 +2,7 @@ package com.energymonitor.security.adapter.in.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.BDDMockito.given;
@@ -87,7 +88,7 @@ class SessionCookiesWebTest extends JwtKeyedTest {
 
     @Test
     void loginSetsHttpOnlyCookiesAndKeepsTheTokensOutOfTheBody() throws Exception {
-        given(loginFlow.login(any(), any(), any(), any())).willReturn(Optional.of(outcome()));
+        given(loginFlow.login(any(), any(), anyBoolean(), any(), any())).willReturn(Optional.of(outcome()));
 
         MvcResult result = mvc.perform(post("/api/v1/auth/login")
                         .header(TRANSPORT, "cookie")
@@ -115,7 +116,7 @@ class SessionCookiesWebTest extends JwtKeyedTest {
 
     @Test
     void loginWithoutTheHeaderKeepsTheTokensInTheBody() throws Exception {
-        given(loginFlow.login(any(), any(), any(), any())).willReturn(Optional.of(outcome()));
+        given(loginFlow.login(any(), any(), anyBoolean(), any(), any())).willReturn(Optional.of(outcome()));
 
         MvcResult result = mvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)

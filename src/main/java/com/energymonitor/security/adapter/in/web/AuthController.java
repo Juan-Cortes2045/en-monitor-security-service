@@ -215,6 +215,11 @@ public class AuthController {
             @ApiResponse(responseCode = "422", description = "The password is well-formed but "
                     + "breaks the configured policy",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "428", description = "acceptTerms is not true: the "
+                    + "client shows "
+                    + "the terms and conditions and repeats the request with acceptTerms: true",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class)))
     })
     @PostMapping("/register")
@@ -222,7 +227,7 @@ public class AuthController {
                                                          HttpServletRequest servlet) {
         var registration = registerUser.register(new RegisterUserCommand(request.email(),
                 request.password(), request.name(), request.lastName(),
-                request.profileImage(), clientIp(servlet)));
+                request.profileImage(), clientIp(servlet), request.acceptsTerms()));
         // After the registration is committed, and never able to fail it: a mail outage must not
         // answer 500 for a registration that was kept. The client can ask for a new code.
         try {
@@ -345,6 +350,11 @@ public class AuthController {
                     + "account has not verified its email address: the client requests a code "
                     + "(/email/verification/resend) and confirms it (/email/verify) before signing in",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "428", description = "The account never accepted the "
+                    + "terms and conditions: the client shows "
+                    + "the terms and conditions and repeats the request with acceptTerms: true",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class)))
     })
     @PostMapping("/login")
@@ -352,7 +362,7 @@ public class AuthController {
                                                HttpServletRequest servlet,
                                                HttpServletResponse response) {
         SecurityLoginFlow.LoginOutcome login = loginFlow.login(request.email(), request.password(),
-                clientIp(servlet), servlet.getHeader("User-Agent"))
+                request.acceptsTerms(), clientIp(servlet), servlet.getHeader("User-Agent"))
                 .orElseThrow(AuthenticationRejectedException::new);
         return ResponseEntity.ok(loginResponse(login, servlet, response));
     }
@@ -383,6 +393,11 @@ public class AuthController {
                             schema = @Schema(implementation = ApiError.class))),
             @ApiResponse(responseCode = "503", description = "Google sign-in is not configured",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "428", description = "The account is new or never "
+                    + "accepted the terms and conditions: the client shows "
+                    + "the terms and conditions and repeats the request with acceptTerms: true",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class)))
     })
     @PostMapping("/google")
@@ -392,8 +407,8 @@ public class AuthController {
         String ip = clientIp(servlet);
         String userAgent = servlet.getHeader("User-Agent");
         SecurityLoginFlow.LoginOutcome login = (request.hasIdToken()
-                ? loginFlow.loginWithGoogleIdToken(request.idToken(), ip, userAgent)
-                : loginFlow.loginWithGoogle(request.code(), ip, userAgent))
+                ? loginFlow.loginWithGoogleIdToken(request.idToken(), request.acceptsTerms(), ip, userAgent)
+                : loginFlow.loginWithGoogle(request.code(), request.acceptsTerms(), ip, userAgent))
                 .orElseThrow(AuthenticationRejectedException::new);
         return ResponseEntity.ok(loginResponse(login, servlet, response));
     }

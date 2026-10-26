@@ -14,6 +14,7 @@ import com.energymonitor.security.domain.model.AuditAction;
 import com.energymonitor.security.domain.model.Email;
 import com.energymonitor.security.domain.model.LoginErrorType;
 import com.energymonitor.security.domain.model.PendingRegistration;
+import com.energymonitor.security.domain.model.User;
 import com.energymonitor.security.domain.model.UserStatus;
 import java.time.Clock;
 import java.time.Instant;
@@ -182,5 +183,22 @@ class AuthenticateUserServiceTest {
         AuthenticationResult result = authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
 
         assertEquals(AuthenticationStatus.USER_NOT_FOUND, result.status());
+    }
+
+    @Test
+    void anAccountThatNeverAcceptedTheTermsGetsNoSessionUntilItDoes() {
+        User user = users.seed("use0000001", "per0000001", "ada@example.com", UserStatus.ACTIVE);
+        User withoutTerms = new User(user.idUser(), user.idPerson(), user.passwordHash(), user.email(),
+                true, user.dateOfRegistration(), UserStatus.ACTIVE, 0, null, null);
+        users.save(withoutTerms);
+
+        AuthenticationResult refused = authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
+        assertEquals(AuthenticationStatus.TERMS_NOT_ACCEPTED, refused.status());
+        assertTrue(audits.logs().isEmpty());
+
+        AuthenticationResult accepted = authenticate.authenticate(new AuthenticateUserCommand(
+                "ada@example.com", UseCaseFixtures.PASSWORD, "10.0.0.7", true));
+        assertTrue(accepted.isSuccess());
+        assertEquals(CLOCK.instant(), users.findActive("use0000001").orElseThrow().termsAcceptedAt().orElseThrow());
     }
 }

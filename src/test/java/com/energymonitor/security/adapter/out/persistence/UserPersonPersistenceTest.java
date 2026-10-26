@@ -84,6 +84,23 @@ class UserPersonPersistenceTest extends JwtKeyedTest {
     }
 
     @Test
+    void theAcceptanceOfTheTermsRoundTripsAndItsAbsenceToo() {
+        PersistenceFixtures.seedPerson(persons);
+        User user = new User(USER_ID, PERSON_ID, PasswordHash.of(HASH),
+                Email.of("ada@example.com"), true, REGISTRATION,
+                UserStatus.ACTIVE, 0, null, null);
+        users.save(user);
+        flushAndClear();
+        assertTrue(users.findActive(USER_ID).orElseThrow().termsAcceptedAt().isEmpty());
+
+        User read = users.findActive(USER_ID).orElseThrow();
+        read.acceptTerms(REGISTRATION);
+        users.save(read);
+        flushAndClear();
+        assertEquals(REGISTRATION, users.findActive(USER_ID).orElseThrow().termsAcceptedAt().orElseThrow());
+    }
+
+    @Test
     void anAccountWithoutAvatarRoundTripsAsAbsent() {
         PersistenceFixtures.seedPerson(persons);
         users.save(new User(USER_ID, PERSON_ID, PasswordHash.of(HASH),
