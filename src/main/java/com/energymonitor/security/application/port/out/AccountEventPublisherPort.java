@@ -2,6 +2,7 @@ package com.energymonitor.security.application.port.out;
 
 import com.energymonitor.security.api.AccountAdministered;
 import com.energymonitor.security.api.AccountDeleted;
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.api.AccountRegistered;
 
 /**
@@ -23,4 +24,9 @@ public interface AccountEventPublisherPort {
      * @param event the change an administrator just made to another account
      */
     void accountAdministered(AccountAdministered event);
+
+    /**
+     * @param event the first sign-in of an account whose address is verified
+     */
+    void accountFirstSignedIn(AccountFirstSignedIn event);
 }

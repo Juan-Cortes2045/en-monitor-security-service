@@ -20,6 +20,9 @@ public final class SecurityMessageTypes {
     /** An account was deleted: its memberships and the homes it alone owned must go. */
     public static final String ACCOUNT_DELETED = "account.deleted";
 
+    /** An account signed in for the first time, its address verified: its owner is welcomed. */
+    public static final String ACCOUNT_FIRST_SIGNED_IN = "account.first-signed-in";
+
     /** A verification code to mail. Carries the code in clear text. */
     public static final String MAIL_EMAIL_VERIFICATION = "mail.email-verification";
 
