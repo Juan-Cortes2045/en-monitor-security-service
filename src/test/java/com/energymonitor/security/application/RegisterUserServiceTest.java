@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.energymonitor.security.application.command.RegisterUserCommand;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
 import com.energymonitor.security.application.exception.PasswordPolicyViolationException;
+import com.energymonitor.security.application.exception.TermsNotAcceptedException;
 import com.energymonitor.security.application.exception.UndeliverableEmailException;
 import com.energymonitor.security.application.usecase.RegisterUserService;
 import com.energymonitor.security.domain.model.PendingRegistration;
@@ -141,5 +142,13 @@ class RegisterUserServiceTest {
                 () -> register.register(command("ada@example.com", "short")));
 
         assertTrue(checkedDomains.isEmpty());
+    }
+
+    @Test
+    void refusesARegistrationThatDoesNotAcceptTheTerms() {
+        assertThrows(TermsNotAcceptedException.class, () -> register.register(new RegisterUserCommand(
+                "ada@example.com", UseCaseFixtures.PASSWORD, "Ada", "Lovelace", null, "10.0.0.1", false)));
+
+        assertTrue(pending.registrations().isEmpty());
     }
 }

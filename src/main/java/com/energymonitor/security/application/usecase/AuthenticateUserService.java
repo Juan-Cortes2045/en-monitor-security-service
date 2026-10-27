@@ -49,7 +49,7 @@ public class AuthenticateUserService implements AuthenticateUser {
                                    PasswordHasherPort passwordHasher,
                                    IdentifierGeneratorPort identifiers,
                                    AuditLogPersistencePort auditLogPort,
-                                   LoginErrorLogPersistencePort loginErrorLogPort, 
+                                   LoginErrorLogPersistencePort loginErrorLogPort,
                                    AccountEventPublisherPort events, Clock clock) {
         this.userPort = userPort;
         this.pendingPort = pendingPort;
@@ -103,6 +103,15 @@ public class AuthenticateUserService implements AuthenticateUser {
         if (!user.isEmailVerified()) {
             loginErrorLogPort.save(error(user, LoginErrorType.EMAIL_NOT_VERIFIED, command.ipAddress(), now));
             return new AuthenticationResult(AuthenticationStatus.EMAIL_NOT_VERIFIED, Optional.empty());
+        }
+
+        // No session either until the terms are accepted. An account created with Google before
+        // they were required never did; the attempt accepts them by saying so.
+        if (!user.hasAcceptedTerms()) {
+            if (!command.acceptTerms()) {
+                return new AuthenticationResult(AuthenticationStatus.TERMS_NOT_ACCEPTED, Optional.empty());
+            }
+            user.acceptTerms(now);
         }
 
         boolean firstSignIn = user.lastLoginAt().isEmpty();

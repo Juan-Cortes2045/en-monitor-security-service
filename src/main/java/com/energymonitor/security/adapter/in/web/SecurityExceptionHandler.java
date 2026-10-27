@@ -14,6 +14,7 @@ import com.energymonitor.security.application.exception.PasswordPolicyViolationE
 import com.energymonitor.security.application.exception.RoleNotFoundException;
 import com.energymonitor.security.application.exception.SecurityApplicationException;
 import com.energymonitor.security.application.exception.SelfAdministrationException;
+import com.energymonitor.security.application.exception.TermsNotAcceptedException;
 import com.energymonitor.security.application.exception.TooManyResetAttemptsException;
 import com.energymonitor.security.application.exception.UndeliverableEmailException;
 import com.energymonitor.security.application.exception.SessionNotFoundException;
@@ -298,6 +299,18 @@ public class SecurityExceptionHandler {
      * @param request   the failed request
      * @return 400
      */
+    /**
+     * The terms and conditions were not accepted: the client shows them and repeats the request
+     * with {@code acceptTerms: true}.
+     *
+     * @return 428
+     */
+    @ExceptionHandler(TermsNotAcceptedException.class)
+    public ResponseEntity<ApiError> handleTermsNotAccepted(TermsNotAcceptedException exception,
+                                                           HttpServletRequest request) {
+        return respond(HttpStatus.PRECONDITION_REQUIRED, exception.getMessage(), request);
+    }
+
     @ExceptionHandler(UndeliverableEmailException.class)
     public ResponseEntity<ApiError> handleUndeliverableEmail(UndeliverableEmailException exception,
                                                              HttpServletRequest request) {

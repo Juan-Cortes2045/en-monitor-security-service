@@ -152,7 +152,27 @@ code, or an account whose changed address is not verified yet, gets **403** ("Ve
 address to sign in.") instead of a session. The check runs after the password, so only someone
 who knows the password learns that the registration exists. The web app then asks for a new code
 (`/email/verification/resend`) and takes the person to enter it; after `/email/verify` the sign-in
-works. Accounts created with Google start verified and skip the request.
+works. Accounts created with Google start verified and skip the request (they still accept the
+terms and conditions, see below).
+
+### Terms and conditions
+
+No account signs in without having accepted the terms and conditions, whatever the method. The
+acceptance is stored in `user.terms_accepted_at`.
+
+- **Registration** needs `"acceptTerms": true`; without it the answer is **428** and nothing is
+  stored. The account created at verification records the instant of the registration.
+- **Google**: the first sign-in creates the account only with `"acceptTerms": true` in
+  `POST /api/v1/auth/google`; without it the answer is **428** and nothing is created. The web
+  then shows the terms and, if they are accepted, opens Google again (its code is single-use);
+  the mobile app repeats the request with the same `idToken`. The registration page sends the
+  checkbox it already shows.
+- **Existing accounts** (`security-029`): accounts registered with a password accepted the terms
+  in the form, which required the checkbox, so they take their registration date. Accounts
+  created with Google before this were never asked: their next sign-in answers 428 until they
+  accept.
+- `POST /api/v1/auth/login` answers 428 the same way for an account without acceptance, and
+  takes `"acceptTerms": true` to record it.
 
 ### Deleting an account
 

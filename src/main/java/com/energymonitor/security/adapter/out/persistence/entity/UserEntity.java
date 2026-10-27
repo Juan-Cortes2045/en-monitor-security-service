@@ -62,6 +62,9 @@ public class UserEntity extends BaseAuditEntity {
     @Column(name = "google_subject", length = 255)
     private String googleSubject;
 
+    @Column(name = "terms_accepted_at")
+    private Instant termsAcceptedAt;
+
     public UserEntity() {
     }
 
@@ -143,6 +146,14 @@ public class UserEntity extends BaseAuditEntity {
 
     public void setGoogleSubject(String googleSubject) {
         this.googleSubject = googleSubject;
+    }
+
+    public Instant getTermsAcceptedAt() {
+        return termsAcceptedAt;
+    }
+
+    public void setTermsAcceptedAt(Instant termsAcceptedAt) {
+        this.termsAcceptedAt = termsAcceptedAt;
     }
 
     public String getProfileImage() {
