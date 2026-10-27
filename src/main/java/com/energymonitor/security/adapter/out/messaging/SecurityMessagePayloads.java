@@ -33,6 +33,11 @@ public final class SecurityMessagePayloads {
                                            Instant validUntil) {
     }
 
+    /** {@code mail.account-deletion}: the same shape as the verification mail. */
+    public record AccountDeletionCodePayload(String userId, String recipient, String code,
+                                             Instant validUntil) {
+    }
+
     /** {@code mail.password-reset} */
     public record PasswordResetPayload(String userId, String recipient, String idResetToken,
                                        String code, Instant validUntil) {

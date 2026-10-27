@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        A deleted account released its address but kept its google_subject, which is unique: the
+        same Google account could not sign up again after deleting (insert refused, 500). Deleting
+        now releases it as well; this frees the accounts deleted before that.
+    -->
+    <changeSet id="security-030-release-google-subject-of-deleted-accounts" author="JuanCortes2045">
+        <comment>Frees the Google account of the accounts already deleted.</comment>
+        <update tableName="user">
+            <column name="google_subject" valueComputed="NULL"/>
+            <where>deleted_at IS NOT NULL AND google_subject IS NOT NULL</where>
+        </update>
+
+        <!-- Nothing to restore: a deleted account never signs in again. -->
+        <rollback/>
+    </changeSet>
+</databaseChangeLog>

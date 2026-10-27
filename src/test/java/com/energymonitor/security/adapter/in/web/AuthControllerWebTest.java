@@ -244,6 +244,90 @@ class AuthControllerWebTest extends JwtKeyedTest {
         verifyNoInteractions(deleteAccount);
     }
 
+    @Test
+    void deletesAGoogleAccountWithTheMailedCode() throws Exception {
+        mvc.perform(post("/api/v1/auth/account/delete")
+                        .header("Authorization", bearerFor(identity()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"123456\"}"))
+                .andExpect(status().isNoContent());
+
+        ArgumentCaptor<DeleteAccountCommand> command = ArgumentCaptor.forClass(DeleteAccountCommand.class);
+        verify(deleteAccount).delete(command.capture());
+        org.junit.jupiter.api.Assertions.assertEquals("123456", command.getValue().code());
+        org.junit.jupiter.api.Assertions.assertNull(command.getValue().password());
+    }
+
+    @Test
+    void refusesADeletionWithBothOrNoneOfPasswordAndCode() throws Exception {
+        for (String body : new String[] {"{}", "{\"password\":\"x\",\"code\":\"123456\"}",
+                "{\"code\":\"12ab56\"}"}) {
+            mvc.perform(post("/api/v1/auth/account/delete")
+                            .header("Authorization", bearerFor(identity()))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest());
+        }
+        verifyNoInteractions(deleteAccount);
+    }
+
+    @Test
+    void sendsTheDeletionCodeOfTheCaller() throws Exception {
+        mvc.perform(post("/api/v1/auth/account/delete/code")
+                        .header("Authorization", bearerFor(identity())))
+                .andExpect(status().isAccepted());
+
+        verify(deleteAccount).sendDeletionCode("USR0000001");
+    }
+
+    @Test
+    void theDeletionCodeAnswers503WhileItCannotBeMailedAnd409ForAPasswordAccount() throws Exception {
+        willThrow(new com.energymonitor.security.application.exception.AccountDeletionCodeUnavailableException(
+                "The deletion code cannot be mailed yet.")).given(deleteAccount).sendDeletionCode("USR0000001");
+        mvc.perform(post("/api/v1/auth/account/delete/code")
+                        .header("Authorization", bearerFor(identity())))
+                .andExpect(status().isServiceUnavailable());
+
+        willThrow(new com.energymonitor.security.application.exception.DeletionCodeNotApplicableException(
+                "This account confirms its deletion with its password.")).given(deleteAccount)
+                .sendDeletionCode("USR0000001");
+        mvc.perform(post("/api/v1/auth/account/delete/code")
+                        .header("Authorization", bearerFor(identity())))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void theDeletionCodeNeedsAToken() throws Exception {
+        mvc.perform(post("/api/v1/auth/account/delete/code"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(deleteAccount);
+    }
+
+    @Test
+    void aGoogleAccountCannotChangeAPasswordItDoesNotHave() throws Exception {
+        willThrow(new com.energymonitor.security.application.exception.PasswordManagedByGoogleException(
+                "This account signs in with Google and has no password to change.")).given(changePassword)
+                .change(any());
+
+        mvc.perform(post("/api/v1/auth/password/change")
+                        .header("Authorization", bearerFor(identity()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"x\",\"newPassword\":\"NewStrong1!\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void theAccountSaysWhetherItWasCreatedWithGoogle() throws Exception {
+        User google = newAccount();
+        google.bindGoogleAccount("g-sub-1");
+        given(findUser.findByIdentifier("USR0000001")).willReturn(Optional.of(google));
+
+        mvc.perform(get("/api/v1/auth/account").header("Authorization", bearerFor(identity())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.googleAccount").value(true));
+    }
+
     // ---------------------------------------------------------------- email verification
     // Each test uses its own caller address: the per-caller limiter is shared by the context.
 

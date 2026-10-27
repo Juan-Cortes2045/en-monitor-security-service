@@ -177,7 +177,21 @@ acceptance is stored in `user.terms_accepted_at`.
 ### Deleting an account
 
 `POST /api/v1/auth/account/delete` with `{password}` deletes the caller's own account after
-checking the password (`401` when it is wrong, `204` when done). It is a soft delete: `user` and
+checking the password (`401` when it is wrong, `204` when done).
+
+An account created with Google has no password the person knows, so it confirms with a code
+instead: `POST /api/v1/auth/account/delete/code` mails a six-digit code to its address (`202`;
+`409` for an account with a password), and `POST /api/v1/auth/account/delete` with `{code}`
+deletes it (`400` when the code is wrong or expired, `429` after five attempts in 15 minutes). The
+code is derived like the verification code (peppered HMAC of the account, its address and the
+15-minute window, with its own purpose prefix) and lives 15 to 30 minutes.
+
+**The code mail is a switch** (`SECURITY_ACCOUNT_DELETION_CODE_MAIL_ENABLED`, false by default):
+the notification service delivers `mail.account-deletion` (same body as `mail.email-verification`:
+`userId`, `recipient`, `code`, `validUntil`), but a message no queue takes stays first in the
+outbox and holds back every mail behind it. So turn it on only once that notification service is
+deployed and its queue is bound; while it is off, asking for the code answers `503` and nothing is
+published. It is a soft delete: `user` and
 `person` get `deleted_at` and the account's sessions are closed. The address is released: the
 deleted row keeps `deleted+<id_user>@deleted.invalid` instead, so the same address can register a
 new account.
@@ -256,6 +270,11 @@ first name, last name (when the Google account has one), photo and address of Go
 starts verified and the account gets a random password nobody knows ("forgot password" sets
 one). An address that already belongs to an account registered with a password is refused with
 **409**: signing in with Google never takes over an existing account.
+
+Such an account has no password to manage: `POST /api/v1/auth/password/change` answers **409**,
+and its deletion is confirmed with a mailed code (see *Deleting an account*). `GET
+/api/v1/auth/account` says so with `"googleAccount": true`, so the clients hide the password
+change and ask for the code.
 
 Setup (once per environment):
 

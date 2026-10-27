@@ -861,6 +861,33 @@ public class AuthController {
         return ResponseEntity.ok(ProfileResponse.from(updated));
     }
 
+    @Operation(summary = "Send the code that confirms deleting a Google account",
+            description = "An account created with Google has no password the person knows, so "
+                    + "it confirms its deletion with a six-digit code mailed to its address, "
+                    + "valid for 15 to 30 minutes. An account with a password confirms with it "
+                    + "instead (409). While the notification service does not deliver this mail "
+                    + "yet, the answer is 503 and nothing is sent.",
+            security = @SecurityRequirement(name = "bearerAuth"))
+    @ApiResponses({
+            @ApiResponse(responseCode = "202", description = "Code sent, empty body",
+                    content = @Content),
+            @ApiResponse(responseCode = "401", description = "Missing, malformed or expired token",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "409", description = "The account has a password; it "
+                    + "confirms its deletion with it",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "503", description = "The code cannot be mailed yet",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class)))
+    })
+    @PostMapping("/account/delete/code")
+    public ResponseEntity<Void> sendDeletionCode(Authentication authentication) {
+        deleteAccount.sendDeletionCode(authentication.getName());
+        return ResponseEntity.accepted().build();
+    }
+
     @Operation(summary = "Delete the caller's own account",
             description = "Confirms the current password, then soft-deletes the account and its "
                     + "person (deleted_at), closes its sessions and drops its home memberships. "
@@ -890,7 +917,7 @@ public class AuthController {
                                               HttpServletRequest servlet,
                                               HttpServletResponse response) {
         deleteAccount.delete(new DeleteAccountCommand(authentication.getName(), request.password(),
-                clientIp(servlet)));
+                request.code(), clientIp(servlet)));
         if (sessionCookies.requested(servlet)) {
             sessionCookies.clear(response);
         }

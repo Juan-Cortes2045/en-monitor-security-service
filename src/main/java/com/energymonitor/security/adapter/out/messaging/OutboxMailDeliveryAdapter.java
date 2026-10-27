@@ -41,4 +41,17 @@ public class OutboxMailDeliveryAdapter implements PasswordResetDeliveryPort,
                 new EmailVerificationPayload(userId, recipient, clearCode, validUntil),
                 clock.instant(), validUntil);
     }
+
+    /**
+     * Queues the code that confirms the deletion of an account created with Google. Not an
+     * override: the wiring only routes {@code AccountDeletionCodeDeliveryPort} here once the
+     * notification service delivers {@code mail.account-deletion}.
+     */
+    public void deliverAccountDeletionCode(String userId, String recipient, String clearCode,
+                                           Instant validUntil) {
+        outbox.write(SecurityMessageTypes.MAIL_ACCOUNT_DELETION,
+                new SecurityMessagePayloads.AccountDeletionCodePayload(userId, recipient, clearCode,
+                        validUntil),
+                clock.instant(), validUntil);
+    }
 }

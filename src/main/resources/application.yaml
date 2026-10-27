@@ -93,6 +93,13 @@ security:
     # address is let through: the verification code still has to arrive.
     enabled: ${SECURITY_EMAIL_DOMAIN_CHECK_ENABLED:true}
 
+  account-deletion:
+    # An account created with Google confirms its deletion with a code mailed to it. Off until
+    # the notification service delivers mail.account-deletion: a message no queue takes stays
+    # first in the outbox and holds back every mail behind it. While off, asking for the code
+    # answers 503 and nothing is published.
+    code-mail-enabled: ${SECURITY_ACCOUNT_DELETION_CODE_MAIL_ENABLED:false}
+
   session-cookie:
     # The web app receives its tokens in HttpOnly cookies (X-Session-Transport: cookie). Secure
     # is what a deployment behind HTTPS needs; the local stack and development mode serve plain
