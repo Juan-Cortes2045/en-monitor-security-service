@@ -1,6 +1,9 @@
 package com.energymonitor.security.infrastructure;
 
 import com.energymonitor.security.adapter.out.dns.DnsEmailDomainCheckAdapter;
+import com.energymonitor.security.application.port.out.AccountDeletionCodeDeliveryPort;
+import com.energymonitor.security.application.exception.AccountDeletionCodeUnavailableException;
+import com.energymonitor.security.adapter.out.messaging.OutboxMailDeliveryAdapter;
 import com.energymonitor.security.adapter.out.security.InMemoryResetAttemptLimiter;
 import com.energymonitor.security.adapter.out.security.PepperedHmacResetCodeHasher;
 import com.energymonitor.security.api.AdministratorQuery;
@@ -408,12 +411,37 @@ public class SecurityApplicationWiring {
                                        PasswordHasherPort hasher, AuditLogPersistencePort audits,
                                        AccountEventPublisherPort events,
                                        AccountDeletionGuardPort deletionGuard,
-                                       IdentifierGeneratorPort identifiers, Clock clock,
+                                       IdentifierGeneratorPort identifiers,
+                                       PasswordResetTokenHasherPort codeHasher,
+                                       AccountDeletionCodeDeliveryPort codeDelivery, Clock clock,
                                        PlatformTransactionManager transactions) {
+        // Five guesses per account per window, like the verification code: a six-digit code is
+        // only safe while guessing is bounded.
         return transactional(transactions,
                 new DeleteAccountService(users, persons, sessions, hasher, audits, events,
-                        deletionGuard, identifiers, clock),
+                        deletionGuard, identifiers, codeHasher, codeDelivery,
+                        new InMemoryResetAttemptLimiter(5, Duration.ofMinutes(15), clock), clock),
                 DeleteAccount.class);
+    }
+
+    /**
+     * Where the deletion code of an account created with Google goes. Off by default: the
+     * notification service does not deliver {@code mail.account-deletion} yet, and a message no
+     * queue takes stays first in the outbox and holds back every mail behind it. Until
+     * {@code security.account-deletion.code-mail-enabled=true}, asking for the code answers 503
+     * and nothing is written.
+     */
+    @Bean
+    public AccountDeletionCodeDeliveryPort accountDeletionCodeDelivery(
+            @Value("${security.account-deletion.code-mail-enabled:false}") boolean enabled,
+            OutboxMailDeliveryAdapter mail) {
+        if (enabled) {
+            return mail::deliverAccountDeletionCode;
+        }
+        return (userId, recipient, code, validUntil) -> {
+            throw new AccountDeletionCodeUnavailableException(
+                    "The deletion code cannot be mailed yet.");
+        };
     }
 
     @Bean
