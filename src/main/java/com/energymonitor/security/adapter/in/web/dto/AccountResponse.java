@@ -27,6 +27,9 @@ import com.energymonitor.security.domain.model.UserStatus;
  *                  elsewhere
  * @param lastName  last name of the person; only {@code GET /account} fills it, {@code null}
  *                  elsewhere
+ * @param googleAccount whether the account was created with Google: it has no password to change
+ *                  and confirms its deletion with a mailed code; only {@code GET /account} and
+ *                  the lookups fill it, {@code null} in the login answer
  */
 public record AccountResponse(
         String idUser,
@@ -36,7 +39,8 @@ public record AccountResponse(
         java.time.Instant lastLogin,
         String profileImage,
         String name,
-        String lastName) {
+        String lastName,
+        Boolean googleAccount) {
 
     /**
      * Maps the credential-free identity returned by the authentication flow.
@@ -47,7 +51,7 @@ public record AccountResponse(
     public static AccountResponse from(AuthenticatedUser identity) {
         return new AccountResponse(identity.idUser(), identity.idPerson(),
                 identity.email().value(), identity.status(), identity.lastLoginAt(),
-                identity.profileImage(), null, null);
+                identity.profileImage(), null, null, null);
     }
 
     /**
@@ -74,6 +78,6 @@ public record AccountResponse(
     public static AccountResponse from(User user, String name, String lastName) {
         return new AccountResponse(user.idUser(), user.idPerson(), user.email().value(),
                 user.status(), user.lastLoginAt().orElse(null),
-                user.profileImage().orElse(null), name, lastName);
+                user.profileImage().orElse(null), name, lastName, user.isGoogleAccount());
     }
 }

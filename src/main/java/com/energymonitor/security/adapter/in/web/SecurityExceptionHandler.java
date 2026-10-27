@@ -14,6 +14,9 @@ import com.energymonitor.security.application.exception.PasswordPolicyViolationE
 import com.energymonitor.security.application.exception.RoleNotFoundException;
 import com.energymonitor.security.application.exception.SecurityApplicationException;
 import com.energymonitor.security.application.exception.SelfAdministrationException;
+import com.energymonitor.security.application.exception.AccountDeletionCodeUnavailableException;
+import com.energymonitor.security.application.exception.DeletionCodeNotApplicableException;
+import com.energymonitor.security.application.exception.PasswordManagedByGoogleException;
 import com.energymonitor.security.application.exception.TermsNotAcceptedException;
 import com.energymonitor.security.application.exception.TooManyResetAttemptsException;
 import com.energymonitor.security.application.exception.UndeliverableEmailException;
@@ -305,6 +308,27 @@ public class SecurityExceptionHandler {
      *
      * @return 428
      */
+    /** An account created with Google has no password to change: 409. */
+    @ExceptionHandler(PasswordManagedByGoogleException.class)
+    public ResponseEntity<ApiError> handlePasswordManagedByGoogle(
+            PasswordManagedByGoogleException exception, HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    /** An account with a password confirms its deletion with it, not with a code: 409. */
+    @ExceptionHandler(DeletionCodeNotApplicableException.class)
+    public ResponseEntity<ApiError> handleDeletionCodeNotApplicable(
+            DeletionCodeNotApplicableException exception, HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    /** The deletion code cannot be mailed yet: 503. */
+    @ExceptionHandler(AccountDeletionCodeUnavailableException.class)
+    public ResponseEntity<ApiError> handleAccountDeletionCodeUnavailable(
+            AccountDeletionCodeUnavailableException exception, HttpServletRequest request) {
+        return respond(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
+    }
+
     @ExceptionHandler(TermsNotAcceptedException.class)
     public ResponseEntity<ApiError> handleTermsNotAccepted(TermsNotAcceptedException exception,
                                                            HttpServletRequest request) {
