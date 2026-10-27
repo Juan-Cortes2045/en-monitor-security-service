@@ -89,6 +89,9 @@ public class UserPersistenceAdapter implements UserPersistencePort {
         repository.findById(idUser).ifPresent(entity -> {
             entity.setDeletedAt(deletedAt);
             entity.setEmail(releasedEmail(idUser));
+            // The Google account is released too: google_subject is unique, so keeping it would
+            // make the same Google account fail (500) when it signs up again after deleting.
+            entity.setGoogleSubject(null);
             repository.save(entity);
         });
     }
