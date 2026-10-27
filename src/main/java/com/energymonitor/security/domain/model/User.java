@@ -153,6 +153,15 @@ public class User {
         return Optional.ofNullable(googleSubject);
     }
 
+    /**
+     * Whether the account was created by signing in with Google. Its password is a random one
+     * nobody knows: it has no password to change, and it confirms its deletion with a code sent
+     * to its address instead.
+     */
+    public boolean isGoogleAccount() {
+        return googleSubject != null;
+    }
+
     /** Binds the account to a Google account; done once, when it is created from Google. */
     public void bindGoogleAccount(String subject) {
         this.googleSubject = Preconditions.optionalText(subject, 255, "googleSubject");
