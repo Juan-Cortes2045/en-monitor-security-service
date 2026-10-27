@@ -266,11 +266,12 @@ public class SecurityApplicationWiring {
                                              PasswordHasherPort hasher,
                                              IdentifierGeneratorPort identifiers,
                                              AuditLogPersistencePort audits,
-                                             LoginErrorLogPersistencePort loginErrorLog, Clock clock,
+                                             LoginErrorLogPersistencePort loginErrorLog,
+                                             AccountEventPublisherPort events, Clock clock,
                                              PlatformTransactionManager transactions) {
         return transactional(transactions,
                 new AuthenticateUserService(users, registrations, hasher, identifiers, audits,
-                        loginErrorLog, clock),
+                        loginErrorLog, events, clock),
                 AuthenticateUser.class);
     }
 

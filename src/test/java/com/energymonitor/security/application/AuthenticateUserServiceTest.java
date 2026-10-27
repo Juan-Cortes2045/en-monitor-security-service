@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.application.command.AuthenticateUserCommand;
 import com.energymonitor.security.application.result.AuthenticatedUser;
 import com.energymonitor.security.application.result.AuthenticationResult;
@@ -18,6 +19,7 @@ import com.energymonitor.security.domain.model.UserStatus;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -40,8 +42,10 @@ class AuthenticateUserServiceTest {
             new UseCaseFixtures.FakeLoginErrorLogPersistencePort();
     private final UseCaseFixtures.FakePendingRegistrationPersistencePort pending =
             new UseCaseFixtures.FakePendingRegistrationPersistencePort();
+    private final UseCaseFixtures.FakeAccountEventPublisherPort events =
+            new UseCaseFixtures.FakeAccountEventPublisherPort();
     private final AuthenticateUserService authenticate =
-            new AuthenticateUserService(users, pending, hasher, identifiers, audits, errors, CLOCK);
+            new AuthenticateUserService(users, pending, hasher, identifiers, audits, errors, events, CLOCK);
 
     private void registeredButNotVerified(Instant at) {
         pending.save(PendingRegistration.request("use0000009", Email.of("ada@example.com"), "Ada",
@@ -64,6 +68,27 @@ class AuthenticateUserServiceTest {
         assertTrue(errors.errors().isEmpty());
         assertEquals(1, audits.logs().size());
         assertEquals(AuditAction.LOGIN, audits.logs().getFirst().action());
+    }
+
+    @Test
+    void theFirstSignInWelcomesTheOwnerOnce() {
+        users.seed("use0000001", "per0000001", "ada@example.com", UserStatus.ACTIVE);
+
+        authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
+        authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
+
+        assertEquals(List.of(new AccountFirstSignedIn("use0000001", CLOCK.instant())),
+                events.eventsOf(AccountFirstSignedIn.class),
+                "only the first successful sign-in is announced");
+    }
+
+    @Test
+    void aFailedSignInAnnouncesNothing() {
+        users.seed("use0000001", "per0000001", "ada@example.com", UserStatus.ACTIVE);
+
+        authenticate.authenticate(attempt("ada@example.com", "wrong-password"));
+
+        assertTrue(events.events().isEmpty());
     }
 
     @Test

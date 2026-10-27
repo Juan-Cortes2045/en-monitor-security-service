@@ -1,7 +1,9 @@
 package com.energymonitor.security.application.usecase;
 
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.application.command.AuthenticateUserCommand;
 import com.energymonitor.security.application.port.in.AuthenticateUser;
+import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
 import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
 import com.energymonitor.security.application.port.out.LoginErrorLogPersistencePort;
@@ -27,6 +29,9 @@ import java.util.Optional;
  * <p>An account that has not confirmed its email address cannot sign in: the right password
  * answers {@link AuthenticationStatus#EMAIL_NOT_VERIFIED} instead of a session. So does the right
  * password of a registration still waiting for its code, which has no account yet.
+ *
+ * <p>The first successful sign-in of an account is announced as {@link AccountFirstSignedIn}, in
+ * the same transaction, so its owner is welcomed once.
  */
 public class AuthenticateUserService implements AuthenticateUser {
 
@@ -36,6 +41,7 @@ public class AuthenticateUserService implements AuthenticateUser {
     private final IdentifierGeneratorPort identifiers;
     private final AuditLogPersistencePort auditLogPort;
     private final LoginErrorLogPersistencePort loginErrorLogPort;
+    private final AccountEventPublisherPort events;
     private final Clock clock;
 
     public AuthenticateUserService(UserPersistencePort userPort,
@@ -43,13 +49,15 @@ public class AuthenticateUserService implements AuthenticateUser {
                                    PasswordHasherPort passwordHasher,
                                    IdentifierGeneratorPort identifiers,
                                    AuditLogPersistencePort auditLogPort,
-                                   LoginErrorLogPersistencePort loginErrorLogPort, Clock clock) {
+                                   LoginErrorLogPersistencePort loginErrorLogPort, 
+                                   AccountEventPublisherPort events, Clock clock) {
         this.userPort = userPort;
         this.pendingPort = pendingPort;
         this.passwordHasher = passwordHasher;
         this.identifiers = identifiers;
         this.auditLogPort = auditLogPort;
         this.loginErrorLogPort = loginErrorLogPort;
+        this.events = events;
         this.clock = clock;
     }
 
@@ -97,9 +105,13 @@ public class AuthenticateUserService implements AuthenticateUser {
             return new AuthenticationResult(AuthenticationStatus.EMAIL_NOT_VERIFIED, Optional.empty());
         }
 
+        boolean firstSignIn = user.lastLoginAt().isEmpty();
         user.recordSuccessfulLogin(now);
         userPort.save(user);
         auditLogPort.save(AuditLog.login(identifiers.generate(), user, command.ipAddress(), now));
+        if (firstSignIn) {
+            events.accountFirstSignedIn(new AccountFirstSignedIn(user.idUser(), now));
+        }
         return new AuthenticationResult(AuthenticationStatus.SUCCESS,
                 Optional.of(new AuthenticatedUser(user.idUser(), user.idPerson(), user.email(),
                         user.status(), user.lastLoginAt().orElseThrow(),

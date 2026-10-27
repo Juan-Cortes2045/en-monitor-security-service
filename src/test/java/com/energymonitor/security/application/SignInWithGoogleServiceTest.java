@@ -12,6 +12,7 @@ import com.energymonitor.security.application.UseCaseFixtures.FakePersonPersiste
 import com.energymonitor.security.application.UseCaseFixtures.FakeTokenGeneratorPort;
 import com.energymonitor.security.application.UseCaseFixtures.FakeUserPersistencePort;
 import com.energymonitor.security.application.exception.AccountNotActiveException;
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
 import com.energymonitor.security.application.result.GoogleIdentity;
@@ -21,6 +22,7 @@ import com.energymonitor.security.domain.model.UserStatus;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -90,6 +92,9 @@ class SignInWithGoogleServiceTest {
         assertEquals(1, fetches);
         assertEquals(1, events.eventsOf(AccountRegistered.class).size(),
                 "only the sign-in that creates the account announces it");
+        assertEquals(List.of(new AccountFirstSignedIn(first.idUser(), NOW)),
+                events.eventsOf(AccountFirstSignedIn.class),
+                "the owner is welcomed on the first sign-in only");
     }
 
     @Test

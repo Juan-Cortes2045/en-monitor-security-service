@@ -3,6 +3,7 @@ package com.energymonitor.security.application.usecase;
 import com.energymonitor.security.application.exception.AccountNotActiveException;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
 import com.energymonitor.security.application.port.in.SignInWithGoogle;
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
 import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
@@ -88,9 +89,13 @@ public class SignInWithGoogleService implements SignInWithGoogle {
         if (!user.canAuthenticate()) {
             throw new AccountNotActiveException("account is " + user.status());
         }
+        boolean firstSignIn = user.lastLoginAt().isEmpty();
         user.recordSuccessfulLogin(now);
         users.save(user);
         audits.save(AuditLog.login(identifiers.generate(), user, ipAddress, now));
+        if (firstSignIn) {
+            events.accountFirstSignedIn(new AccountFirstSignedIn(user.idUser(), now));
+        }
         return Optional.of(new AuthenticatedUser(user.idUser(), user.idPerson(), user.email(),
                 user.status(), user.lastLoginAt().orElseThrow(), user.profileImage().orElse(null)));
     }

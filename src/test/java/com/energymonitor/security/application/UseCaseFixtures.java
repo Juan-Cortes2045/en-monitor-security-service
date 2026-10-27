@@ -2,6 +2,7 @@ package com.energymonitor.security.application;
 
 import com.energymonitor.security.api.AccountAdministered;
 import com.energymonitor.security.api.AccountDeleted;
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.api.PasswordResetDeliveryPort;
 import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
@@ -693,6 +694,11 @@ public final class UseCaseFixtures {
 
         @Override
         public void accountAdministered(AccountAdministered event) {
+            events.add(event);
+        }
+
+        @Override
+        public void accountFirstSignedIn(AccountFirstSignedIn event) {
             events.add(event);
         }
 
