@@ -111,7 +111,7 @@ class InternalControllerWebTest extends JwtKeyedTest {
     @DisplayName("looks up profiles in one call")
     void profiles() throws Exception {
         given(profiles.findByIds(List.of("use0000001", "use0000404"))).willReturn(Map.of(
-                "use0000001", new UserProfile("use0000001", "Ada", "Lovelace", "ada@example.com")));
+                "use0000001", new UserProfile("use0000001", "Ada", "Lovelace", "ada@example.com", null)));
 
         mvc.perform(post("/internal/users/profiles").header("X-Internal-Token", TOKEN)
                         .contentType(MediaType.APPLICATION_JSON)
