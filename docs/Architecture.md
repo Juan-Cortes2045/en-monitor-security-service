@@ -131,18 +131,18 @@ configured every internal call is refused. The API gateway never forwards `/inte
 | backend → security | `GET /internal/users/{id}/permissions` | `{permissions: [...]}`; 404 without an active account |
 | backend → security | `POST /internal/users/profiles` `{userIds}` (≤ 500) | `{profiles: [{userId, name, lastName, email}]}`, active accounts only |
 | backend → security | `GET /internal/administrators` | `{userIds: [...]}` |
-| security → backend | `GET /internal/accounts/{id}/deletion-check` | 204 may delete; 409 `{message}` refused |
+| security → home service | `GET /internal/accounts/{id}/deletion-check` | 204 may delete; 409 `{message}` refused |
 
 - **Deleting an account.** The use case asks the deletion check after verifying the password and
   before changing anything. A 409 is returned to the user as is; no answer within 1 s to connect
   and 2 s to read, or any other status, refuses the deletion with 503. Once deleted,
-  `account.deleted` tells the backend to clean up.
+  `account.deleted` tells the home service and the backend to clean up.
 - **The backend's side** caches permissions and administrators 30 s and profiles 60 s (Caffeine),
   and degrades when this service does not answer: names are left out of the member list and the
   administrator notifications, alert mail is skipped (push still goes), its `/api/v1/admin/**`
   routes answer 503 and a message consumer lets the broker retry.
 - **A deletion that slips past the check** (a member joined in between) does not block
-  `account.deleted`: the backend hands the home to its oldest remaining member.
+  `account.deleted`: the home service hands the home to its oldest remaining member.
 
 ## Boundaries with other services
 

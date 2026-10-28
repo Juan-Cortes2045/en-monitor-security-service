@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.application.command.AuthenticateUserCommand;
 import com.energymonitor.security.application.result.AuthenticatedUser;
 import com.energymonitor.security.application.result.AuthenticationResult;
@@ -13,10 +14,13 @@ import com.energymonitor.security.application.usecase.AuthenticateUserService;
 import com.energymonitor.security.domain.model.AuditAction;
 import com.energymonitor.security.domain.model.Email;
 import com.energymonitor.security.domain.model.LoginErrorType;
+import com.energymonitor.security.domain.model.PendingRegistration;
+import com.energymonitor.security.domain.model.User;
 import com.energymonitor.security.domain.model.UserStatus;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -37,8 +41,17 @@ class AuthenticateUserServiceTest {
             new UseCaseFixtures.FakeAuditLogPersistencePort();
     private final UseCaseFixtures.FakeLoginErrorLogPersistencePort errors =
             new UseCaseFixtures.FakeLoginErrorLogPersistencePort();
+    private final UseCaseFixtures.FakePendingRegistrationPersistencePort pending =
+            new UseCaseFixtures.FakePendingRegistrationPersistencePort();
+    private final UseCaseFixtures.FakeAccountEventPublisherPort events =
+            new UseCaseFixtures.FakeAccountEventPublisherPort();
     private final AuthenticateUserService authenticate =
-            new AuthenticateUserService(users, hasher, identifiers, audits, errors, CLOCK);
+            new AuthenticateUserService(users, pending, hasher, identifiers, audits, errors, events, CLOCK);
+
+    private void registeredButNotVerified(Instant at) {
+        pending.save(PendingRegistration.request("use0000009", Email.of("ada@example.com"), "Ada",
+                null, hasher.hash(UseCaseFixtures.PASSWORD), null, null, at));
+    }
 
     private AuthenticateUserCommand attempt(String email, String password) {
         return new AuthenticateUserCommand(email, password, "10.0.0.7");
@@ -56,6 +69,27 @@ class AuthenticateUserServiceTest {
         assertTrue(errors.errors().isEmpty());
         assertEquals(1, audits.logs().size());
         assertEquals(AuditAction.LOGIN, audits.logs().getFirst().action());
+    }
+
+    @Test
+    void theFirstSignInWelcomesTheOwnerOnce() {
+        users.seed("use0000001", "per0000001", "ada@example.com", UserStatus.ACTIVE);
+
+        authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
+        authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
+
+        assertEquals(List.of(new AccountFirstSignedIn("use0000001", CLOCK.instant())),
+                events.eventsOf(AccountFirstSignedIn.class),
+                "only the first successful sign-in is announced");
+    }
+
+    @Test
+    void aFailedSignInAnnouncesNothing() {
+        users.seed("use0000001", "per0000001", "ada@example.com", UserStatus.ACTIVE);
+
+        authenticate.authenticate(attempt("ada@example.com", "wrong-password"));
+
+        assertTrue(events.events().isEmpty());
     }
 
     @Test
@@ -144,5 +178,52 @@ class AuthenticateUserServiceTest {
 
         assertEquals(AuthenticationStatus.INVALID_CREDENTIALS, result.status());
         assertEquals(LoginErrorType.INVALID_PASSWORD, errors.errors().getFirst().errorType());
+    }
+
+    @Test
+    void aRegistrationWaitingForItsCodeIsToldToVerifyWithTheRightPassword() {
+        registeredButNotVerified(CLOCK.instant());
+
+        AuthenticationResult result = authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
+
+        assertEquals(AuthenticationStatus.EMAIL_NOT_VERIFIED, result.status());
+        assertTrue(result.user().isEmpty());
+        assertEquals(LoginErrorType.USER_NOT_FOUND, errors.errors().getFirst().errorType());
+        assertTrue(audits.logs().isEmpty());
+    }
+
+    @Test
+    void aRegistrationWaitingForItsCodeRevealsNothingToAWrongPassword() {
+        registeredButNotVerified(CLOCK.instant());
+
+        AuthenticationResult result = authenticate.authenticate(attempt("ada@example.com", "Wrong1Pass!"));
+
+        assertEquals(AuthenticationStatus.USER_NOT_FOUND, result.status());
+    }
+
+    @Test
+    void anExpiredRegistrationIsNoLongerMentioned() {
+        registeredButNotVerified(CLOCK.instant().minus(PendingRegistration.LIFETIME));
+
+        AuthenticationResult result = authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
+
+        assertEquals(AuthenticationStatus.USER_NOT_FOUND, result.status());
+    }
+
+    @Test
+    void anAccountThatNeverAcceptedTheTermsGetsNoSessionUntilItDoes() {
+        User user = users.seed("use0000001", "per0000001", "ada@example.com", UserStatus.ACTIVE);
+        User withoutTerms = new User(user.idUser(), user.idPerson(), user.passwordHash(), user.email(),
+                true, user.dateOfRegistration(), UserStatus.ACTIVE, 0, null, null);
+        users.save(withoutTerms);
+
+        AuthenticationResult refused = authenticate.authenticate(attempt("ada@example.com", UseCaseFixtures.PASSWORD));
+        assertEquals(AuthenticationStatus.TERMS_NOT_ACCEPTED, refused.status());
+        assertTrue(audits.logs().isEmpty());
+
+        AuthenticationResult accepted = authenticate.authenticate(new AuthenticateUserCommand(
+                "ada@example.com", UseCaseFixtures.PASSWORD, "10.0.0.7", true));
+        assertTrue(accepted.isSuccess());
+        assertEquals(CLOCK.instant(), users.findActive("use0000001").orElseThrow().termsAcceptedAt().orElseThrow());
     }
 }

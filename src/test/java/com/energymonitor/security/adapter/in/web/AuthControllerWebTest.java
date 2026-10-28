@@ -2,6 +2,7 @@ package com.energymonitor.security.adapter.in.web;
 
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -42,6 +43,7 @@ import com.energymonitor.security.application.port.in.UpdateUserProfile;
 import com.energymonitor.security.application.result.AuthenticatedUser;
 import com.energymonitor.security.domain.model.Email;
 import com.energymonitor.security.domain.model.PasswordHash;
+import com.energymonitor.security.domain.model.PendingRegistration;
 import com.energymonitor.security.domain.model.Person;
 import com.energymonitor.security.domain.model.User;
 import com.energymonitor.security.domain.model.UserStatus;
@@ -129,6 +131,11 @@ class AuthControllerWebTest extends JwtKeyedTest {
                 Email.of(EMAIL), REGISTRATION, null);
     }
 
+    private static PendingRegistration newRegistration() {
+        return PendingRegistration.request("USR0000001", Email.of(EMAIL), "Ada", "Lovelace",
+                PasswordHash.of("$2a$10$abcdefghij"), null, "10.0.0.1", REGISTRATION);
+    }
+
     private static AuthenticatedUser identity() {
         return new AuthenticatedUser("USR0000001", "PER0000001", Email.of(EMAIL),
                 UserStatus.ACTIVE, Instant.now(), null);
@@ -149,40 +156,40 @@ class AuthControllerWebTest extends JwtKeyedTest {
     // ---------------------------------------------------------------- registration
 
     @Test
-    void registersAnAccountAndAnswers201() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+    void acceptsARegistrationAndAnswers202WithoutAnAccount() throws Exception {
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.idUser").value("USR0000001"))
-                .andExpect(jsonPath("$.idPerson").value("PER0000001"))
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.email").value(EMAIL))
-                .andExpect(jsonPath("$.status").value("ACTIVE"));
+                .andExpect(jsonPath("$.expiresAt").exists())
+                .andExpect(jsonPath("$.idUser").doesNotExist())
+                .andExpect(jsonPath("$.status").doesNotExist());
     }
 
     @Test
-    void sendsTheVerificationCodeOnceTheAccountIsCreated() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+    void sendsTheVerificationCodeOnceTheRegistrationIsKept() throws Exception {
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
 
         verify(emailVerification).sendCode(EMAIL);
     }
 
     @Test
-    void stillAnswers201WhenTheVerificationCodeCannotBeSent() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+    void stillAnswers202WhenTheVerificationCodeCannotBeSent() throws Exception {
+        given(registerUser.register(any())).willReturn(newRegistration());
         willThrow(new IllegalStateException("smtp down")).given(emailVerification).sendCode(anyString());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
     }
 
     // ---------------------------------------------------------------- account
@@ -237,6 +244,90 @@ class AuthControllerWebTest extends JwtKeyedTest {
         verifyNoInteractions(deleteAccount);
     }
 
+    @Test
+    void deletesAGoogleAccountWithTheMailedCode() throws Exception {
+        mvc.perform(post("/api/v1/auth/account/delete")
+                        .header("Authorization", bearerFor(identity()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"123456\"}"))
+                .andExpect(status().isNoContent());
+
+        ArgumentCaptor<DeleteAccountCommand> command = ArgumentCaptor.forClass(DeleteAccountCommand.class);
+        verify(deleteAccount).delete(command.capture());
+        org.junit.jupiter.api.Assertions.assertEquals("123456", command.getValue().code());
+        org.junit.jupiter.api.Assertions.assertNull(command.getValue().password());
+    }
+
+    @Test
+    void refusesADeletionWithBothOrNoneOfPasswordAndCode() throws Exception {
+        for (String body : new String[] {"{}", "{\"password\":\"x\",\"code\":\"123456\"}",
+                "{\"code\":\"12ab56\"}"}) {
+            mvc.perform(post("/api/v1/auth/account/delete")
+                            .header("Authorization", bearerFor(identity()))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isBadRequest());
+        }
+        verifyNoInteractions(deleteAccount);
+    }
+
+    @Test
+    void sendsTheDeletionCodeOfTheCaller() throws Exception {
+        mvc.perform(post("/api/v1/auth/account/delete/code")
+                        .header("Authorization", bearerFor(identity())))
+                .andExpect(status().isAccepted());
+
+        verify(deleteAccount).sendDeletionCode("USR0000001");
+    }
+
+    @Test
+    void theDeletionCodeAnswers503WhileItCannotBeMailedAnd409ForAPasswordAccount() throws Exception {
+        willThrow(new com.energymonitor.security.application.exception.AccountDeletionCodeUnavailableException(
+                "The deletion code cannot be mailed yet.")).given(deleteAccount).sendDeletionCode("USR0000001");
+        mvc.perform(post("/api/v1/auth/account/delete/code")
+                        .header("Authorization", bearerFor(identity())))
+                .andExpect(status().isServiceUnavailable());
+
+        willThrow(new com.energymonitor.security.application.exception.DeletionCodeNotApplicableException(
+                "This account confirms its deletion with its password.")).given(deleteAccount)
+                .sendDeletionCode("USR0000001");
+        mvc.perform(post("/api/v1/auth/account/delete/code")
+                        .header("Authorization", bearerFor(identity())))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void theDeletionCodeNeedsAToken() throws Exception {
+        mvc.perform(post("/api/v1/auth/account/delete/code"))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(deleteAccount);
+    }
+
+    @Test
+    void aGoogleAccountCannotChangeAPasswordItDoesNotHave() throws Exception {
+        willThrow(new com.energymonitor.security.application.exception.PasswordManagedByGoogleException(
+                "This account signs in with Google and has no password to change.")).given(changePassword)
+                .change(any());
+
+        mvc.perform(post("/api/v1/auth/password/change")
+                        .header("Authorization", bearerFor(identity()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"x\",\"newPassword\":\"NewStrong1!\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void theAccountSaysWhetherItWasCreatedWithGoogle() throws Exception {
+        User google = newAccount();
+        google.bindGoogleAccount("g-sub-1");
+        given(findUser.findByIdentifier("USR0000001")).willReturn(Optional.of(google));
+
+        mvc.perform(get("/api/v1/auth/account").header("Authorization", bearerFor(identity())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.googleAccount").value(true));
+    }
+
     // ---------------------------------------------------------------- email verification
     // Each test uses its own caller address: the per-caller limiter is shared by the context.
 
@@ -288,24 +379,24 @@ class AuthControllerWebTest extends JwtKeyedTest {
 
     @Test
     void passesTheSubmittedFieldsAndTheCallerAddressToTheUseCase() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
 
         verify(registerUser).register(any(RegisterUserCommand.class));
     }
 
     @Test
     void neverReturnsThePasswordHashOnRegistration() throws Exception {
-        given(registerUser.register(any())).willReturn(newAccount());
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         String body = mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
 
         org.junit.jupiter.api.Assertions.assertFalse(body.contains("passwordHash"),
@@ -379,7 +470,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
 
     @Test
     void signsInWithGoogleWithoutAnAccessToken() throws Exception {
-        given(loginFlow.loginWithGoogle(any(), any(), any()))
+        given(loginFlow.loginWithGoogle(any(), anyBoolean(), any(), any()))
                 .willReturn(Optional.of(new SecurityLoginFlow.LoginOutcome("access-token",
                         "refresh-token", 900L, identity(), "SES0000001")));
 
@@ -395,7 +486,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
 
     @Test
     void anInvalidGoogleCodeIsUnauthorized() throws Exception {
-        given(loginFlow.loginWithGoogle(any(), any(), any())).willReturn(Optional.empty());
+        given(loginFlow.loginWithGoogle(any(), anyBoolean(), any(), any())).willReturn(Optional.empty());
 
         mvc.perform(post("/api/v1/auth/google")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -406,10 +497,38 @@ class AuthControllerWebTest extends JwtKeyedTest {
     }
 
     @Test
+    void googleAsksForTheTermsWith428AndPassesTheirAcceptance() throws Exception {
+        given(loginFlow.loginWithGoogle(eq("new"), eq(false), any(), any())).willThrow(
+                new com.energymonitor.security.application.exception.TermsNotAcceptedException(
+                        "Accept the terms and conditions to continue with Google."));
+        given(loginFlow.loginWithGoogle(eq("new"), eq(true), any(), any())).willReturn(Optional.empty());
+
+        mvc.perform(post("/api/v1/auth/google").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"new\"}"))
+                .andExpect(status().isPreconditionRequired())
+                .andExpect(jsonPath("$.status").value(428));
+        mvc.perform(post("/api/v1/auth/google").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"new\",\"acceptTerms\":true}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void aRegistrationWithoutTheTermsIsAskedForThemWith428() throws Exception {
+        willThrow(new com.energymonitor.security.application.exception.TermsNotAcceptedException(
+                "Accept the terms and conditions to register.")).given(registerUser).register(
+                org.mockito.ArgumentMatchers.argThat(command -> !command.acceptTerms()));
+
+        mvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registrationBody()))
+                .andExpect(status().isPreconditionRequired());
+    }
+
+    @Test
     void googleConflictsAndOutagesHaveTheirOwnStatus() throws Exception {
-        given(loginFlow.loginWithGoogle(eq("taken"), any(), any())).willThrow(
+        given(loginFlow.loginWithGoogle(eq("taken"), anyBoolean(), any(), any())).willThrow(
                 new com.energymonitor.security.application.exception.EmailAlreadyRegisteredException("taken"));
-        given(loginFlow.loginWithGoogle(eq("off"), any(), any())).willThrow(
+        given(loginFlow.loginWithGoogle(eq("off"), anyBoolean(), any(), any())).willThrow(
                 new com.energymonitor.security.application.exception.GoogleSignInUnavailableException("off"));
 
         mvc.perform(post("/api/v1/auth/google").contentType(MediaType.APPLICATION_JSON)
@@ -424,8 +543,43 @@ class AuthControllerWebTest extends JwtKeyedTest {
     }
 
     @Test
+    void theMobileAppSignsInWithGoogleWithAnIdToken() throws Exception {
+        given(loginFlow.loginWithGoogleIdToken(eq("eyJ.mobile.token"), anyBoolean(), any(), any()))
+                .willReturn(Optional.of(new SecurityLoginFlow.LoginOutcome("access-token",
+                        "refresh-token", 900L, identity(), "SES0000001")));
+
+        mvc.perform(post("/api/v1/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"idToken":"eyJ.mobile.token"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").value("access-token"))
+                .andExpect(jsonPath("$.refreshToken").value("refresh-token"));
+        verify(loginFlow, never()).loginWithGoogle(any(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void anInvalidGoogleIdTokenIsUnauthorized() throws Exception {
+        given(loginFlow.loginWithGoogleIdToken(any(), anyBoolean(), any(), any())).willReturn(Optional.empty());
+
+        mvc.perform(post("/api/v1/auth/google").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"idToken\":\"forged\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void aGoogleRequestWithBothCredentialsIsRefused() throws Exception {
+        mvc.perform(post("/api/v1/auth/google").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"4/0Ab\",\"idToken\":\"eyJ\"}"))
+                .andExpect(status().isBadRequest());
+        verify(loginFlow, never()).loginWithGoogle(any(), anyBoolean(), any(), any());
+        verify(loginFlow, never()).loginWithGoogleIdToken(any(), anyBoolean(), any(), any());
+    }
+
+    @Test
     void refusesToSignInUntilTheAddressIsVerified() throws Exception {
-        given(loginFlow.login(any(), any(), any(), any()))
+        given(loginFlow.login(any(), any(), anyBoolean(), any(), any()))
                 .willThrow(new com.energymonitor.security.application.exception.EmailNotVerifiedException("not verified"));
 
         mvc.perform(post("/api/v1/auth/login")
@@ -439,7 +593,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
 
     @Test
     void logsInAndAnswersTheTokensAndTheAccount() throws Exception {
-        given(loginFlow.login(any(), any(), any(), any()))
+        given(loginFlow.login(any(), any(), anyBoolean(), any(), any()))
                 .willReturn(Optional.of(new SecurityLoginFlow.LoginOutcome("access-token",
                         "refresh-token", 900L, identity(), "SES0000001")));
 
@@ -459,7 +613,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
 
     @Test
     void neverExposesTheHashInsideTheLoginAccount() throws Exception {
-        given(loginFlow.login(any(), any(), any(), any()))
+        given(loginFlow.login(any(), any(), anyBoolean(), any(), any()))
                 .willReturn(Optional.of(new SecurityLoginFlow.LoginOutcome("access-token",
                         "refresh-token", 900L, identity(), "SES0000001")));
 
@@ -476,7 +630,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
 
     @Test
     void answersOneGenericUnauthorizedWhenTheAttemptIsRejected() throws Exception {
-        given(loginFlow.login(any(), any(), any(), any())).willReturn(Optional.empty());
+        given(loginFlow.login(any(), any(), anyBoolean(), any(), any())).willReturn(Optional.empty());
 
         mvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -498,7 +652,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.password").exists());
 
-        verify(loginFlow, never()).login(any(), any(), any(), any());
+        verify(loginFlow, never()).login(any(), any(), anyBoolean(), any(), any());
     }
 
     // ------------------------------------------------------------- password reset
@@ -714,17 +868,17 @@ class AuthControllerWebTest extends JwtKeyedTest {
     @Test
     void leavesRegistrationReachableWithoutAToken() throws Exception {
         // The permit list is what makes sign-up possible at all: a caller has no identity yet.
-        given(registerUser.register(any())).willReturn(newAccount());
+        given(registerUser.register(any())).willReturn(newRegistration());
 
         mvc.perform(post("/api/v1/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(registrationBody()))
-                .andExpect(status().isCreated());
+                .andExpect(status().isAccepted());
     }
 
     @Test
     void reachesTheLoginUseCaseWithoutATokenRatherThanBeingBlockedByTheFilterChain() throws Exception {
-        given(loginFlow.login(any(), any(), any(), any())).willReturn(Optional.empty());
+        given(loginFlow.login(any(), any(), anyBoolean(), any(), any())).willReturn(Optional.empty());
 
         mvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -733,7 +887,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
                                 """))
                 .andExpect(jsonPath("$.message").value("Invalid credentials."));
 
-        verify(loginFlow).login(any(), any(), any(), any());
+        verify(loginFlow).login(any(), any(), anyBoolean(), any(), any());
     }
 
     @Test

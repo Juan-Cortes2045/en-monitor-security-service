@@ -14,6 +14,10 @@ import com.energymonitor.security.application.exception.PasswordPolicyViolationE
 import com.energymonitor.security.application.exception.RoleNotFoundException;
 import com.energymonitor.security.application.exception.SecurityApplicationException;
 import com.energymonitor.security.application.exception.SelfAdministrationException;
+import com.energymonitor.security.application.exception.AccountDeletionCodeUnavailableException;
+import com.energymonitor.security.application.exception.DeletionCodeNotApplicableException;
+import com.energymonitor.security.application.exception.PasswordManagedByGoogleException;
+import com.energymonitor.security.application.exception.TermsNotAcceptedException;
 import com.energymonitor.security.application.exception.TooManyResetAttemptsException;
 import com.energymonitor.security.application.exception.UndeliverableEmailException;
 import com.energymonitor.security.application.exception.SessionNotFoundException;
@@ -298,6 +302,39 @@ public class SecurityExceptionHandler {
      * @param request   the failed request
      * @return 400
      */
+    /**
+     * The terms and conditions were not accepted: the client shows them and repeats the request
+     * with {@code acceptTerms: true}.
+     *
+     * @return 428
+     */
+    /** An account created with Google has no password to change: 409. */
+    @ExceptionHandler(PasswordManagedByGoogleException.class)
+    public ResponseEntity<ApiError> handlePasswordManagedByGoogle(
+            PasswordManagedByGoogleException exception, HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    /** An account with a password confirms its deletion with it, not with a code: 409. */
+    @ExceptionHandler(DeletionCodeNotApplicableException.class)
+    public ResponseEntity<ApiError> handleDeletionCodeNotApplicable(
+            DeletionCodeNotApplicableException exception, HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    /** The deletion code cannot be mailed yet: 503. */
+    @ExceptionHandler(AccountDeletionCodeUnavailableException.class)
+    public ResponseEntity<ApiError> handleAccountDeletionCodeUnavailable(
+            AccountDeletionCodeUnavailableException exception, HttpServletRequest request) {
+        return respond(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(TermsNotAcceptedException.class)
+    public ResponseEntity<ApiError> handleTermsNotAccepted(TermsNotAcceptedException exception,
+                                                           HttpServletRequest request) {
+        return respond(HttpStatus.PRECONDITION_REQUIRED, exception.getMessage(), request);
+    }
+
     @ExceptionHandler(UndeliverableEmailException.class)
     public ResponseEntity<ApiError> handleUndeliverableEmail(UndeliverableEmailException exception,
                                                              HttpServletRequest request) {

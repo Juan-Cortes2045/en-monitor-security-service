@@ -2,7 +2,9 @@ package com.energymonitor.security.application.usecase;
 
 import com.energymonitor.security.application.exception.AccountNotActiveException;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
+import com.energymonitor.security.application.exception.TermsNotAcceptedException;
 import com.energymonitor.security.application.port.in.SignInWithGoogle;
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
 import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
@@ -70,7 +72,8 @@ public class SignInWithGoogleService implements SignInWithGoogle {
     }
 
     @Override
-    public Optional<AuthenticatedUser> signIn(GoogleIdentity identity, String ipAddress) {
+    public Optional<AuthenticatedUser> signIn(GoogleIdentity identity, String ipAddress,
+                                              boolean acceptTerms) {
         if (!identity.emailVerified() || identity.email() == null || identity.subject() == null) {
             return Optional.empty();
         }
@@ -83,14 +86,26 @@ public class SignInWithGoogleService implements SignInWithGoogle {
                 throw new EmailAlreadyRegisteredException(
                         "an account already exists for " + email + "; sign in with its password");
             }
+            // Signing up with Google skips the registration form and its checkbox: the terms are
+            // asked here, before anything is created.
+            requireTerms(acceptTerms);
             user = create(identity, email, ipAddress, now);
         }
         if (!user.canAuthenticate()) {
             throw new AccountNotActiveException("account is " + user.status());
         }
+        // Accounts created with Google before the terms were required accept them now.
+        if (!user.hasAcceptedTerms()) {
+            requireTerms(acceptTerms);
+            user.acceptTerms(now);
+        }
+        boolean firstSignIn = user.lastLoginAt().isEmpty();
         user.recordSuccessfulLogin(now);
         users.save(user);
         audits.save(AuditLog.login(identifiers.generate(), user, ipAddress, now));
+        if (firstSignIn) {
+            events.accountFirstSignedIn(new AccountFirstSignedIn(user.idUser(), now));
+        }
         return Optional.of(new AuthenticatedUser(user.idUser(), user.idPerson(), user.email(),
                 user.status(), user.lastLoginAt().orElseThrow(), user.profileImage().orElse(null)));
     }
@@ -113,6 +128,12 @@ public class SignInWithGoogleService implements SignInWithGoogle {
                 ipAddress, null, now));
         events.accountRegistered(new AccountRegistered(user.idUser(), email.value(), now));
         return user;
+    }
+
+    private static void requireTerms(boolean acceptTerms) {
+        if (!acceptTerms) {
+            throw new TermsNotAcceptedException("Accept the terms and conditions to continue with Google.");
+        }
     }
 
     /** Given name, else the display name, else the part of the address before the @. */

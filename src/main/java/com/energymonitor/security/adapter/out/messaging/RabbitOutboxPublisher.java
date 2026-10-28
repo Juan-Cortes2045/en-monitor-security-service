@@ -5,19 +5,27 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 /**
- * Publishes outbox messages to RabbitMQ with publisher confirms.
+ * Publishes outbox messages to RabbitMQ with correlated publisher confirms.
  *
  * <p>A message counts as published only when the broker confirms it and it was routed to at
  * least one queue. The template is mandatory, so a message no queue is bound for comes back
  * instead of vanishing, and is retried until the consumer has declared its queue.
+ *
+ * <p>The confirmation is correlated rather than simple on purpose: the broker sends the return
+ * before the ack, but a simple confirm is waited for on the publishing thread while the return is
+ * handled on another, so it may arrive after the wait ended and an unrouted message would pass as
+ * published. With correlation data, Spring AMQP sets the returned message on it before it
+ * completes the confirmation.
  *
  * <p>Messages are persistent, so a broker restart does not lose them, and a message with an
  * expiry carries it as the AMQP expiration, so the broker drops a code nobody can use anymore.
@@ -28,7 +36,6 @@ public class RabbitOutboxPublisher implements OutboxPublisher {
     private final String exchange;
     private final Duration confirmTimeout;
     private final Clock clock;
-    private final Set<String> returned = ConcurrentHashMap.newKeySet();
 
     public RabbitOutboxPublisher(RabbitTemplate rabbit, String exchange, Duration confirmTimeout,
                                  Clock clock) {
@@ -37,8 +44,6 @@ public class RabbitOutboxPublisher implements OutboxPublisher {
         this.confirmTimeout = confirmTimeout;
         this.clock = clock;
         rabbit.setMandatory(true);
-        rabbit.setReturnsCallback(back ->
-                returned.add(back.getMessage().getMessageProperties().getMessageId()));
     }
 
     @Override
@@ -57,14 +62,27 @@ public class RabbitOutboxPublisher implements OutboxPublisher {
         }
         Message message = new Message(payload.getBytes(StandardCharsets.UTF_8), properties);
 
-        returned.remove(idMessage);
-        rabbit.invoke(operations -> {
-            operations.send(exchange, type, message);
-            operations.waitForConfirmsOrDie(confirmTimeout.toMillis());
-            return null;
-        });
-        if (returned.remove(idMessage)) {
+        CorrelationData correlation = new CorrelationData(idMessage);
+        rabbit.send(exchange, type, message, correlation);
+        CorrelationData.Confirm confirm = awaitConfirm(correlation, type);
+        if (!confirm.ack()) {
+            throw new IllegalStateException("the broker refused " + type + ": " + confirm.reason());
+        }
+        if (correlation.getReturned() != null) {
             throw new IllegalStateException("no queue is bound for " + type + " yet");
+        }
+    }
+
+    private CorrelationData.Confirm awaitConfirm(CorrelationData correlation, String type) {
+        try {
+            return correlation.getFuture().get(confirmTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException late) {
+            throw new IllegalStateException("the broker did not confirm " + type + " in time", late);
+        } catch (ExecutionException failed) {
+            throw new IllegalStateException("the confirmation of " + type + " failed", failed.getCause());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while waiting to confirm " + type, interrupted);
         }
     }
 }

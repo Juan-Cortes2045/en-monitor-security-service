@@ -28,7 +28,9 @@ spring:
     username: ${RABBITMQ_USERNAME:energy-monitor}
     password: ${RABBITMQ_PASSWORD:}
     # A message is marked as published only after the broker confirms it and a queue took it.
-    publisher-confirm-type: simple
+    # Correlated, not simple: the publisher reads the return from the correlation data, which is
+    # set before the confirmation completes (see RabbitOutboxPublisher).
+    publisher-confirm-type: correlated
     publisher-returns: true
     template:
       mandatory: true
@@ -65,9 +67,9 @@ internal-api:
   # Generate with: openssl rand -hex 32
   token: ${INTERNAL_API_TOKEN:}
   allowed-networks: ${INTERNAL_API_ALLOWED_NETWORKS:127.0.0.1/32,::1/128,172.16.0.0/12}
-  # Asked before deleting an account (GET /internal/accounts/{id}/deletion-check). No answer
-  # within the timeouts refuses the deletion with 503.
-  backend-url: ${BACKEND_INTERNAL_URL:http://localhost:8083}
+  # The home service, asked before deleting an account (GET /internal/accounts/{id}/deletion-check).
+  # No answer within the timeouts refuses the deletion with 503.
+  home-service-url: ${HOME_SERVICE_URL:http://localhost:8086}
   connect-timeout: PT1S
   read-timeout: PT2S
 
@@ -90,6 +92,13 @@ security:
     # (MX) nor address (A/AAAA), e.g. a mistyped "gmial.con". When DNS cannot be reached the
     # address is let through: the verification code still has to arrive.
     enabled: ${SECURITY_EMAIL_DOMAIN_CHECK_ENABLED:true}
+
+  account-deletion:
+    # An account created with Google confirms its deletion with a code mailed to it. Off until
+    # the notification service delivers mail.account-deletion: a message no queue takes stays
+    # first in the outbox and holds back every mail behind it. While off, asking for the code
+    # answers 503 and nothing is published.
+    code-mail-enabled: ${SECURITY_ACCOUNT_DELETION_CODE_MAIL_ENABLED:false}
 
   session-cookie:
     # The web app receives its tokens in HttpOnly cookies (X-Session-Transport: cookie). Secure

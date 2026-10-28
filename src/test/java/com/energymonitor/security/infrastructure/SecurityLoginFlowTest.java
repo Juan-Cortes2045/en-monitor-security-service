@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
@@ -138,7 +139,7 @@ class SecurityLoginFlowTest {
         SecurityLoginFlow realFlow = flowWith(realIssuer(Duration.ofMinutes(15)));
 
         Optional<SecurityLoginFlow.LoginOutcome> outcome = realFlow.login("someone@example.com",
-                "StrongPass1!", "10.0.0.1", "JUnit");
+                "StrongPass1!", false, "10.0.0.1", "JUnit");
 
         assertTrue(outcome.isPresent());
         assertEquals("the-refresh-token", outcome.orElseThrow().refreshToken());
@@ -153,7 +154,7 @@ class SecurityLoginFlowTest {
         given(tokenIssuer.issue(any())).willReturn("access-token");
         given(tokenIssuer.accessTokenTtl()).willReturn(Duration.ofMinutes(15));
 
-        flow.login("someone@example.com", "StrongPass1!", "10.0.0.1", "JUnit");
+        flow.login("someone@example.com", "StrongPass1!", false, "10.0.0.1", "JUnit");
 
         var authentication = ArgumentCaptor.forClass(AuthenticateUserCommand.class);
         verify(authenticateUser).authenticate(authentication.capture());
@@ -170,7 +171,7 @@ class SecurityLoginFlowTest {
         given(tokenIssuer.issue(any())).willReturn("access-token");
         given(tokenIssuer.accessTokenTtl()).willReturn(Duration.ofMinutes(15));
 
-        flow.login("someone@example.com", "StrongPass1!", "203.0.113.7", "JUnit/5");
+        flow.login("someone@example.com", "StrongPass1!", false, "203.0.113.7", "JUnit/5");
 
         var session = ArgumentCaptor.forClass(CreateUserSessionCommand.class);
         verify(createUserSession).create(session.capture());
@@ -183,7 +184,7 @@ class SecurityLoginFlowTest {
         given(authenticateUser.authenticate(any())).willReturn(new AuthenticationResult(
                 AuthenticationStatus.USER_NOT_FOUND, Optional.empty()));
 
-        assertTrue(flow.login("nobody@example.com", "StrongPass1!", "10.0.0.1", "JUnit").isEmpty());
+        assertTrue(flow.login("nobody@example.com", "StrongPass1!", false, "10.0.0.1", "JUnit").isEmpty());
 
         verify(createUserSession, never()).create(any());
         verify(tokenIssuer, never()).issue(any());
@@ -194,10 +195,32 @@ class SecurityLoginFlowTest {
         given(authenticateUser.authenticate(any())).willReturn(new AuthenticationResult(
                 AuthenticationStatus.INVALID_CREDENTIALS, Optional.empty()));
 
-        assertTrue(flow.login("someone@example.com", "wrong", "10.0.0.1", "JUnit").isEmpty());
+        assertTrue(flow.login("someone@example.com", "wrong", false, "10.0.0.1", "JUnit").isEmpty());
 
         verify(createUserSession, never()).create(any());
         verify(tokenIssuer, never()).issue(any());
+    }
+
+    @Test
+    void asksForTheTermsWhenTheAccountNeverAcceptedThem() {
+        given(authenticateUser.authenticate(any())).willReturn(new AuthenticationResult(
+                AuthenticationStatus.TERMS_NOT_ACCEPTED, Optional.empty()));
+
+        assertThrows(com.energymonitor.security.application.exception.TermsNotAcceptedException.class,
+                () -> flow.login("someone@example.com", "right", false, "10.0.0.1", "JUnit"));
+
+        verify(createUserSession, never()).create(any());
+        verify(tokenIssuer, never()).issue(any());
+    }
+
+    @Test
+    void passesTheAcceptanceOfTheTermsToTheUseCase() {
+        givenSuccessfulAuthentication();
+
+        flow.login("someone@example.com", "StrongPass1!", true, "10.0.0.1", "JUnit");
+
+        verify(authenticateUser).authenticate(org.mockito.ArgumentMatchers.argThat(
+                com.energymonitor.security.application.command.AuthenticateUserCommand::acceptTerms));
     }
 
     @Test
@@ -206,7 +229,7 @@ class SecurityLoginFlowTest {
                 AuthenticationStatus.EMAIL_NOT_VERIFIED, Optional.empty()));
 
         assertThrows(EmailNotVerifiedException.class,
-                () -> flow.login("someone@example.com", "right", "10.0.0.1", "JUnit"));
+                () -> flow.login("someone@example.com", "right", false, "10.0.0.1", "JUnit"));
 
         verify(createUserSession, never()).create(any());
         verify(tokenIssuer, never()).issue(any());
@@ -220,7 +243,7 @@ class SecurityLoginFlowTest {
             given(authenticateUser.authenticate(any()))
                     .willReturn(new AuthenticationResult(blocked, Optional.empty()));
 
-            assertTrue(flow.login("someone@example.com", "StrongPass1!", "10.0.0.1", "JUnit")
+            assertTrue(flow.login("someone@example.com", "StrongPass1!", false, "10.0.0.1", "JUnit")
                     .isEmpty(), "Status " + blocked + " must not reach the session step");
             verify(createUserSession, never()).create(any());
         }
@@ -233,7 +256,7 @@ class SecurityLoginFlowTest {
         given(tokenIssuer.accessTokenTtl()).willReturn(Duration.ofMinutes(15));
 
         Optional<SecurityLoginFlow.LoginOutcome> outcome =
-                flow.login("someone@example.com", "StrongPass1!", "10.0.0.1", "JUnit");
+                flow.login("someone@example.com", "StrongPass1!", false, "10.0.0.1", "JUnit");
 
         assertEquals("the-refresh-token", outcome.orElseThrow().refreshToken(),
                 "The client must receive the secret that was generated for it");
@@ -254,7 +277,7 @@ class SecurityLoginFlowTest {
         given(tokenIssuer.issue(any())).willReturn("access-token");
         given(tokenIssuer.accessTokenTtl()).willReturn(Duration.ofMinutes(15));
 
-        flow.login("someone@example.com", "StrongPass1!", "10.0.0.1", "JUnit");
+        flow.login("someone@example.com", "StrongPass1!", false, "10.0.0.1", "JUnit");
 
         var stored = ArgumentCaptor.forClass(RefreshToken.class);
         verify(refreshTokens).save(stored.capture());
@@ -285,7 +308,7 @@ class SecurityLoginFlowTest {
 
         org.junit.jupiter.api.Assertions.assertThrows(
                 com.energymonitor.security.application.exception.GoogleSignInUnavailableException.class,
-                () -> flow.loginWithGoogle("code", "10.0.0.1", "JUnit"));
+                () -> flow.loginWithGoogle("code", false, "10.0.0.1", "JUnit"));
     }
 
     @Test
@@ -293,7 +316,7 @@ class SecurityLoginFlowTest {
         given(google.isConfigured()).willReturn(true);
         given(google.exchange("bad")).willReturn(Optional.empty());
 
-        assertTrue(flow.loginWithGoogle("bad", "10.0.0.1", "JUnit").isEmpty());
+        assertTrue(flow.loginWithGoogle("bad", false, "10.0.0.1", "JUnit").isEmpty());
         verify(createUserSession, never()).create(any());
     }
 
@@ -303,16 +326,56 @@ class SecurityLoginFlowTest {
                 "g-1", "someone@example.com", true, "Some", "One", "Some One", null);
         given(google.isConfigured()).willReturn(true);
         given(google.exchange("good")).willReturn(Optional.of(googleIdentity));
-        given(signInWithGoogle.signIn(googleIdentity, "10.0.0.1")).willReturn(Optional.of(identity()));
+        given(signInWithGoogle.signIn(googleIdentity, "10.0.0.1", false)).willReturn(Optional.of(identity()));
         given(createUserSession.create(any())).willReturn(session());
         given(secrets.generateToken()).willReturn("the-refresh-token");
         given(identifiers.generate()).willReturn("rft0000001");
         given(hasher.hash("the-refresh-token")).willReturn("hash-of-the-refresh-token");
 
-        var outcome = flow.loginWithGoogle("good", "10.0.0.1", "JUnit");
+        var outcome = flow.loginWithGoogle("good", false, "10.0.0.1", "JUnit");
 
         assertTrue(outcome.isPresent());
         assertEquals("the-refresh-token", outcome.orElseThrow().refreshToken());
         assertEquals("USR0000001", outcome.orElseThrow().account().idUser());
+    }
+
+    @Test
+    void googleIdTokensAreUnavailableWithoutAClient() {
+        given(google.isConfigured()).willReturn(false);
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.energymonitor.security.application.exception.GoogleSignInUnavailableException.class,
+                () -> flow.loginWithGoogleIdToken("token", false, "10.0.0.1", "JUnit"));
+        verify(google, never()).verify(any());
+    }
+
+    @Test
+    void anInvalidGoogleIdTokenOpensNoSession() {
+        given(google.isConfigured()).willReturn(true);
+        given(google.verify("forged")).willReturn(Optional.empty());
+
+        assertTrue(flow.loginWithGoogleIdToken("forged", false, "10.0.0.1", "JUnit").isEmpty());
+        verify(signInWithGoogle, never()).signIn(any(), any(), anyBoolean());
+        verify(createUserSession, never()).create(any());
+    }
+
+    @Test
+    void aValidGoogleIdTokenOpensTheUsualSessionWithoutExchangingACode() {
+        var googleIdentity = new com.energymonitor.security.application.result.GoogleIdentity(
+                "g-1", "someone@example.com", true, "Some", "One", "Some One", null);
+        given(google.isConfigured()).willReturn(true);
+        given(google.verify("good-token")).willReturn(Optional.of(googleIdentity));
+        given(signInWithGoogle.signIn(googleIdentity, "10.0.0.1", false)).willReturn(Optional.of(identity()));
+        given(createUserSession.create(any())).willReturn(session());
+        given(secrets.generateToken()).willReturn("the-refresh-token");
+        given(identifiers.generate()).willReturn("rft0000001");
+        given(hasher.hash("the-refresh-token")).willReturn("hash-of-the-refresh-token");
+
+        var outcome = flow.loginWithGoogleIdToken("good-token", false, "10.0.0.1", "JUnit");
+
+        assertTrue(outcome.isPresent());
+        assertEquals("the-refresh-token", outcome.orElseThrow().refreshToken());
+        assertEquals("USR0000001", outcome.orElseThrow().account().idUser());
+        verify(google, never()).exchange(any());
     }
 }

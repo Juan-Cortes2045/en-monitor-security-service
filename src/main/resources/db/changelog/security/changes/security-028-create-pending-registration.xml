@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!--
+        Registrations waiting for their verification code.
+
+        Registering no longer creates person and user rows: it stores the request here, and the
+        account is created only when the code sent to the address comes back. An address with no
+        mailbox behind it therefore leaves no account; its request is deleted when it expires
+        (24 hours), and a verified one is deleted when it becomes the account.
+
+        id_user is the identifier the account will take. Only the password hash is stored.
+    -->
+    <changeSet id="security-028-create-pending-registration" author="JuanCortes2045">
+        <comment>Creates the pending_registration table: registrations not verified yet.</comment>
+
+        <createTable tableName="pending_registration">
+            <column name="id_user" type="VARCHAR(10)">
+                <constraints primaryKey="true" primaryKeyName="pk_pending_registration" nullable="false"/>
+            </column>
+            <column name="email" type="VARCHAR(255)">
+                <constraints nullable="false" unique="true" uniqueConstraintName="uq_pending_registration_email"/>
+            </column>
+            <column name="name" type="VARCHAR(100)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_name" type="VARCHAR(100)"/>
+            <column name="password_hash" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="profile_image" type="MEDIUMTEXT"/>
+            <!-- Recorded in the audit trail when the account is created. -->
+            <column name="ip_address" type="VARCHAR(45)"/>
+            <column name="requested_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="expires_at" type="DATETIME(6)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <!-- The hourly purge deletes by expiry. -->
+        <createIndex tableName="pending_registration" indexName="idx_pending_registration_expires_at">
+            <column name="expires_at"/>
+        </createIndex>
+
+        <rollback>
+            <dropTable tableName="pending_registration"/>
+        </rollback>
+    </changeSet>
+</databaseChangeLog>

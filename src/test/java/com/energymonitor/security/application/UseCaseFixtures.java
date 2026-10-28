@@ -2,6 +2,7 @@ package com.energymonitor.security.application;
 
 import com.energymonitor.security.api.AccountAdministered;
 import com.energymonitor.security.api.AccountDeleted;
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.api.PasswordResetDeliveryPort;
 import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
@@ -13,6 +14,7 @@ import com.energymonitor.security.application.port.out.PasswordPolicyPersistence
 import com.energymonitor.security.application.port.out.PasswordResetTokenHasherPort;
 import com.energymonitor.security.application.port.out.PasswordResetTokenPersistencePort;
 import com.energymonitor.security.application.port.out.PermissionPersistencePort;
+import com.energymonitor.security.application.port.out.PendingRegistrationPersistencePort;
 import com.energymonitor.security.application.port.out.PersonPersistencePort;
 import com.energymonitor.security.application.port.out.ResetAttemptLimiterPort;
 import com.energymonitor.security.application.port.out.SystemRolePermissionPersistencePort;
@@ -28,6 +30,7 @@ import com.energymonitor.security.domain.model.PasswordHash;
 import com.energymonitor.security.domain.model.PasswordPolicy;
 import com.energymonitor.security.domain.model.PasswordResetToken;
 import com.energymonitor.security.domain.model.Permission;
+import com.energymonitor.security.domain.model.PendingRegistration;
 import com.energymonitor.security.domain.model.Person;
 import com.energymonitor.security.domain.model.SystemRole;
 import com.energymonitor.security.domain.model.SystemRolePermission;
@@ -102,12 +105,46 @@ public final class UseCaseFixtures {
         public User seed(String idUser, String idPerson, String email, UserStatus status) {
             User user = new User(idUser, idPerson, PasswordHash.of("hash:" + PASSWORD),
                     Email.of(email), true, REGISTRATION, status, 0, null, null);
+            user.acceptTerms(REGISTRATION);
             byId.put(idUser, user);
             return user;
         }
 
         public List<User> users() {
             return new ArrayList<>(byId.values());
+        }
+    }
+
+    public static final class FakePendingRegistrationPersistencePort
+            implements PendingRegistrationPersistencePort {
+
+        private final Map<String, PendingRegistration> byEmail = new LinkedHashMap<>();
+
+        @Override
+        public PendingRegistration save(PendingRegistration registration) {
+            byEmail.put(registration.email().value(), registration);
+            return registration;
+        }
+
+        @Override
+        public Optional<PendingRegistration> findByEmail(Email email) {
+            return Optional.ofNullable(byEmail.get(email.value()));
+        }
+
+        @Override
+        public void delete(String idUser) {
+            byEmail.values().removeIf(registration -> registration.idUser().equals(idUser));
+        }
+
+        @Override
+        public int deleteExpired(Instant instant) {
+            int before = byEmail.size();
+            byEmail.values().removeIf(registration -> registration.isExpiredAt(instant));
+            return before - byEmail.size();
+        }
+
+        public List<PendingRegistration> registrations() {
+            return new ArrayList<>(byEmail.values());
         }
     }
 
@@ -658,6 +695,11 @@ public final class UseCaseFixtures {
 
         @Override
         public void accountAdministered(AccountAdministered event) {
+            events.add(event);
+        }
+
+        @Override
+        public void accountFirstSignedIn(AccountFirstSignedIn event) {
             events.add(event);
         }
 

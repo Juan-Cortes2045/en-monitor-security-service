@@ -40,7 +40,7 @@ It does not start without the RSA key pair or the pepper.
 `INTERNAL_API_TOKEN` must be the value of energy-monitor-backend: it protects the internal calls
 between both (see [docs/Architecture.md](docs/Architecture.md#internal-api)). Without it the
 backend cannot ask for permissions or profiles, and deleting an account answers 503 because the
-backend refuses the deletion check (`BACKEND_INTERNAL_URL`).
+home service refuses the deletion check (`HOME_SERVICE_URL`).
 
 ## RSA key pair
 
@@ -105,48 +105,104 @@ balancer, add a rate limiter there too. And because the limit is keyed by addres
 everyone behind one NAT shares it, which is why the allowance is generous enough to
 absorb an office.
 
-### The email verification code
+### Registration and the email verification code
 
-Before creating an account, registration checks that the domain of the address can receive mail:
-it must exist in DNS and publish a mail server (MX) or an address (A/AAAA). A mistyped or invented
-domain (`gmial.con`) is refused with **400** and nothing is created. When DNS cannot be reached the
-address is let through (an outage must not stop registrations) and the verification code below is
-what proves the mailbox. `SECURITY_EMAIL_DOMAIN_CHECK_ENABLED=false` turns the check off; the test
-profile does, so the suite never needs the network. Whether a given mailbox exists cannot be
-asked reliably (most providers do not tell, and probing them gets a server blacklisted): that is
-the code's job.
+**No account exists until its address is verified.** `POST /api/v1/auth/register` validates the
+request and answers **202** with `{email, expiresAt}`; it writes no `person` and no `user` row.
+It keeps the request in `pending_registration` (password hashed) and has energy-monitor-backend
+mail a six-digit code to the address. `POST /api/v1/auth/email/verify` with `{email, code}` is what
+creates the account: the person and the user, already verified, an audit `CREATE` entry and the
+`account.registered` event, and the request is deleted. An address nobody reads therefore never
+becomes an account: its request expires after **24 hours** and an hourly job deletes it
+(`security.registration.purge-enabled=false` turns the job off).
 
-Registering has energy-monitor-backend mail a six-digit code to the new address. `POST /api/v1/auth/email/verify`
-with `{email, code}` marks the address as verified; `POST /api/v1/auth/email/verification/resend`
-sends the current code again and always answers `202`.
+- The request reserves the account's identifier, so the code (derived from it) and the
+  delivery record of the mail already point at the account it becomes.
+- Registering again with the same address replaces the request and invalidates its code (a
+  mistyped password can be fixed that way). An address that already has an account gets **409**.
+- `POST /api/v1/auth/email/verification/resend` sends the current code again, for a request or for
+  an account whose address changed, and always answers `202`.
 
-The code is derived, not stored: `HMAC-SHA256` with the same pepper, over the account, its
-address and the current fifteen-minute window, reduced to six digits. A code is accepted during
-its window and the next one, so it lives between 15 and 30 minutes, and changing the address
-invalidates it. Guessing is bounded twice: the per-address limit above, and five attempts per
-address per window, so spreading guesses over many callers does not help.
+Before keeping a request, registration checks the domain of the address in two steps, and so
+does a profile update that changes the email:
 
-An account must verify its address before it can sign in. With the right password, an unverified
-account gets **403** ("Verify your email address to sign in.") instead of a session, recorded as
-`EMAIL_NOT_VERIFIED` in the login error trail. The check runs after the password, so only someone
-who knows the password learns that the account exists. The web app then asks for a new code
+1. **Mistyped provider.** A domain one or two keystrokes away from a well-known provider
+   (`meil.com` → `mail.com`, `gmial.con` → `gmail.com`, `hotmail.co` → `hotmail.com`) is refused
+   with **400**, and the message names the provider it was probably meant to be. DNS cannot catch
+   these: many are registered on purpose and publish real mail servers that collect whatever is
+   sent to them. The providers and the tolerance are in `domain/service/MistypedEmailDomains`.
+2. **Deliverable domain.** It must exist in DNS and publish a mail server (MX) or an address
+   (A/AAAA). An invented domain is refused with **400** and nothing is stored. When DNS cannot
+   be reached the address is let through (an outage must not stop registrations).
+   `SECURITY_EMAIL_DOMAIN_CHECK_ENABLED=false` turns this step off; the test profile does, so the
+   suite never needs the network.
+
+Neither step proves that the mailbox exists: that cannot be asked reliably (most providers do not
+tell, and probing them gets a server blacklisted). That is the verification code's job.
+
+The code is derived, not stored: `HMAC-SHA256` with the same pepper, over the account identifier
+(the reserved one for a request), the address and the current fifteen-minute window, reduced to
+six digits. A code is accepted during its window and the next one, so it lives between 15 and 30
+minutes, and changing the address invalidates it. Guessing is bounded twice: the per-address limit
+above, and five attempts per address per window, so spreading guesses over many callers does not
+help.
+
+Signing in needs a verified address. With the right password, a request still waiting for its
+code, or an account whose changed address is not verified yet, gets **403** ("Verify your email
+address to sign in.") instead of a session. The check runs after the password, so only someone
+who knows the password learns that the registration exists. The web app then asks for a new code
 (`/email/verification/resend`) and takes the person to enter it; after `/email/verify` the sign-in
-works. Accounts created with Google start verified.
+works. Accounts created with Google start verified and skip the request (they still accept the
+terms and conditions, see below).
+
+### Terms and conditions
+
+No account signs in without having accepted the terms and conditions, whatever the method. The
+acceptance is stored in `user.terms_accepted_at`.
+
+- **Registration** needs `"acceptTerms": true`; without it the answer is **428** and nothing is
+  stored. The account created at verification records the instant of the registration.
+- **Google**: the first sign-in creates the account only with `"acceptTerms": true` in
+  `POST /api/v1/auth/google`; without it the answer is **428** and nothing is created. The web
+  then shows the terms and, if they are accepted, opens Google again (its code is single-use);
+  the mobile app repeats the request with the same `idToken`. The registration page sends the
+  checkbox it already shows.
+- **Existing accounts** (`security-029`): accounts registered with a password accepted the terms
+  in the form, which required the checkbox, so they take their registration date. Accounts
+  created with Google before this were never asked: their next sign-in answers 428 until they
+  accept.
+- `POST /api/v1/auth/login` answers 428 the same way for an account without acceptance, and
+  takes `"acceptTerms": true` to record it.
 
 ### Deleting an account
 
 `POST /api/v1/auth/account/delete` with `{password}` deletes the caller's own account after
-checking the password (`401` when it is wrong, `204` when done). It is a soft delete: `user` and
+checking the password (`401` when it is wrong, `204` when done).
+
+An account created with Google has no password the person knows, so it confirms with a code
+instead: `POST /api/v1/auth/account/delete/code` mails a six-digit code to its address (`202`;
+`409` for an account with a password), and `POST /api/v1/auth/account/delete` with `{code}`
+deletes it (`400` when the code is wrong or expired, `429` after five attempts in 15 minutes). The
+code is derived like the verification code (peppered HMAC of the account, its address and the
+15-minute window, with its own purpose prefix) and lives 15 to 30 minutes.
+
+**The code mail is a switch** (`SECURITY_ACCOUNT_DELETION_CODE_MAIL_ENABLED`, false by default):
+the notification service delivers `mail.account-deletion` (same body as `mail.email-verification`:
+`userId`, `recipient`, `code`, `validUntil`), but a message no queue takes stays first in the
+outbox and holds back every mail behind it. So turn it on only once that notification service is
+deployed and its queue is bound; while it is off, asking for the code answers `503` and nothing is
+published. It is a soft delete: `user` and
 `person` get `deleted_at` and the account's sessions are closed. The address is released: the
 deleted row keeps `deleted+<id_user>@deleted.invalid` instead, so the same address can register a
 new account.
 
-Before changing anything the service asks energy-monitor-backend whether the account may go
+Before changing anything the service asks the home service whether the account may go
 (`GET /internal/accounts/{id}/deletion-check`). If the account is the only owner of a home that
-still has other members, the request is refused with `409` and the backend's readable `message`:
-the ownership must be handed over or the members removed first. If the backend does not answer,
-the answer is `503` and nothing is deleted. Once deleted, `account.deleted` tells the backend to
-drop the memberships and the homes nobody else is left in. An access token issued before the
+still has other members, the request is refused with `409` and the home service's readable
+`message`: the ownership must be handed over or the members removed first. If the home service
+does not answer, the answer is `503` and nothing is deleted. Once deleted, `account.deleted` tells
+the home service to drop the memberships and the homes nobody else is left in, and the backend to
+drop the account's notification preferences and devices. An access token issued before the
 deletion keeps working until it expires, at most 15 minutes; no refresh token can renew it.
 
 ### Administrators and global roles (RBAC)
@@ -206,11 +262,19 @@ one when there are several. Nothing else about the administrators is exposed.
 ### Sign in with Google
 
 `POST /api/v1/auth/google {code}` exchanges the authorization code of Google's sign-in popup
-(web app) for the usual access and refresh tokens. The first time it creates the account with the
+(web app) for the usual access and refresh tokens. The mobile app signs in natively instead and
+sends `POST /api/v1/auth/google {idToken}`: the ID token is checked like the one the code
+returns (Google's signature, issuer, expiry, and audience = `GOOGLE_CLIENT_ID`), so the app must
+request it with the **web** client id as `webClientId`. A body with both or neither is `400`. The first time it creates the account with the
 first name, last name (when the Google account has one), photo and address of Google; the address
 starts verified and the account gets a random password nobody knows ("forgot password" sets
 one). An address that already belongs to an account registered with a password is refused with
 **409**: signing in with Google never takes over an existing account.
+
+Such an account has no password to manage: `POST /api/v1/auth/password/change` answers **409**,
+and its deletion is confirmed with a mailed code (see *Deleting an account*). `GET
+/api/v1/auth/account` says so with `"googleAccount": true`, so the clients hide the password
+change and ask for the code.
 
 Setup (once per environment):
 
@@ -224,6 +288,11 @@ Setup (once per environment):
 4. Put the client ID and secret in this `.env` (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) and the
    same client ID in the web app's `.env.local` (`VITE_GOOGLE_CLIENT_ID`); restart both. Both
    empty = the Google button answers `503`.
+5. Mobile app: in the **same project**, create another OAuth client ID of type **Android** with
+   the package `com.energymonitor.mobile` and the SHA-1 of the key that signs the APK
+   (`apksigner verify --print-certs app-release.apk`). The app sends the web client ID
+   (`EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`), never the Android one; Google matches the Android client
+   by package and SHA-1, and without it the native sign-in fails with `DEVELOPER_ERROR`.
 
 ### Sessions: tokens in the body or in HttpOnly cookies
 

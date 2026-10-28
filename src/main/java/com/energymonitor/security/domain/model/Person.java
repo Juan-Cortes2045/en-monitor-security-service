@@ -67,6 +67,27 @@ public class Person {
         this.lastName = Preconditions.optionalText(lastName, NAME_MAX, "lastName");
     }
 
+    /**
+     * Replaces the first name alone, keeping the last name.
+     *
+     * @param name new first name, required
+     */
+    public void changeName(String name) {
+        this.name = Preconditions.text(name == null ? null : name.trim(), NAME_MAX, "name");
+    }
+
+    /**
+     * Replaces the last name alone. It is optional: an account created from Google may have
+     * none, and a blank value removes it.
+     *
+     * @param lastName new last name; blank or {@code null} for none
+     */
+    public void changeLastName(String lastName) {
+        String trimmed = lastName == null ? "" : lastName.trim();
+        this.lastName = trimmed.isEmpty() ? null
+                : Preconditions.optionalText(trimmed, NAME_MAX, "lastName");
+    }
+
     @Override
     public boolean equals(Object other) {
         if (this == other) {

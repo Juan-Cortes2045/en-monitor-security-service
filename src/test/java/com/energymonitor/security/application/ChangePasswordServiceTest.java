@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.energymonitor.security.application.command.ChangePasswordCommand;
 import com.energymonitor.security.application.exception.CurrentPasswordMismatchException;
+import com.energymonitor.security.application.exception.PasswordManagedByGoogleException;
 import com.energymonitor.security.application.exception.PasswordPolicyViolationException;
 import com.energymonitor.security.application.usecase.ChangePasswordService;
 import com.energymonitor.security.domain.model.AuditAction;
@@ -44,6 +45,19 @@ class ChangePasswordServiceTest {
 
         assertTrue(hasher.matches("NewStrong1!", users.findActive("use0000001").orElseThrow().passwordHash()));
         assertEquals(AuditAction.UPDATE, audits.logs().getFirst().action());
+    }
+
+    @Test
+    void aGoogleAccountHasNoPasswordToChange() {
+        users.seed("use0000001", "per0000001", "ada@gmail.com", UserStatus.ACTIVE)
+                .bindGoogleAccount("g-sub-1");
+        var before = users.findActive("use0000001").orElseThrow().passwordHash();
+
+        assertThrows(PasswordManagedByGoogleException.class,
+                () -> change.change(new ChangePasswordCommand("use0000001", UseCaseFixtures.PASSWORD,
+                        "NewStrong1!", "10.0.0.3")));
+        assertEquals(before, users.findActive("use0000001").orElseThrow().passwordHash());
+        assertTrue(audits.logs().isEmpty());
     }
 
     @Test

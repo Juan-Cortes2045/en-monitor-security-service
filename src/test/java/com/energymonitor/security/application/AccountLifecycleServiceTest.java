@@ -2,12 +2,14 @@ package com.energymonitor.security.application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.energymonitor.security.application.command.ChangeUserStatusCommand;
 import com.energymonitor.security.application.command.UpdateUserProfileCommand;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
+import com.energymonitor.security.application.exception.UndeliverableEmailException;
 import com.energymonitor.security.application.usecase.FindUserService;
 import com.energymonitor.security.application.usecase.ManageUserStatusService;
 import com.energymonitor.security.application.usecase.UpdateUserProfileService;
@@ -36,7 +38,8 @@ class AccountLifecycleServiceTest {
             new UseCaseFixtures.FakeIdentifierGeneratorPort();
     private final FindUserService findUser = new FindUserService(users);
     private final UpdateUserProfileService updateProfile =
-            new UpdateUserProfileService(users, persons, audits, identifiers, CLOCK);
+            new UpdateUserProfileService(users, persons, audits, identifiers,
+                    domain -> !"nowhere.invalid".equals(domain), CLOCK);
     private final ManageUserStatusService manageStatus =
             new ManageUserStatusService(users, audits, identifiers, CLOCK);
 
@@ -79,6 +82,55 @@ class AccountLifecycleServiceTest {
                 "Grace", "Hopper", null, null, "10.0.0.5"));
 
         assertEquals(List.of("Grace Hopper"), persons.savedNames());
+    }
+
+    @Test
+    void renamesTheFirstNameAloneAndKeepsTheLastName() {
+        seedAda();
+
+        Person updated = updateProfile.update(new UpdateUserProfileCommand("use0000001",
+                "Grace", null, null, null, "10.0.0.5"));
+
+        assertEquals("Grace", updated.name());
+        assertEquals("Lovelace", updated.lastName());
+        assertEquals(List.of("Grace Lovelace"), persons.savedNames());
+    }
+
+    @Test
+    void changesTheLastNameAloneAndKeepsTheFirstName() {
+        seedAda();
+
+        Person updated = updateProfile.update(new UpdateUserProfileCommand("use0000001",
+                null, "King", null, null, "10.0.0.5"));
+
+        assertEquals("Ada", updated.name());
+        assertEquals("King", updated.lastName());
+    }
+
+    @Test
+    void aGoogleAccountWithoutLastNameRenamesItsFirstName() {
+        seedAda();
+        persons.findActive("per0000001").orElseThrow().changeLastName(null);
+
+        Person updated = updateProfile.update(new UpdateUserProfileCommand("use0000001",
+                "Ana", null, null, null, "10.0.0.5"));
+
+        assertEquals("Ana", updated.name());
+        assertNull(updated.lastName());
+    }
+
+    @Test
+    void aBlankLastNameRemovesItAndABlankFirstNameIsRefused() {
+        seedAda();
+
+        Person updated = updateProfile.update(new UpdateUserProfileCommand("use0000001",
+                null, "   ", null, null, "10.0.0.5"));
+        assertNull(updated.lastName());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> updateProfile.update(new UpdateUserProfileCommand("use0000001",
+                        "  ", null, null, null, "10.0.0.5")));
+        assertEquals("Ada", persons.findActive("per0000001").orElseThrow().name());
     }
 
     @Test
@@ -143,6 +195,29 @@ class AccountLifecycleServiceTest {
         assertThrows(EmailAlreadyRegisteredException.class,
                 () -> updateProfile.update(new UpdateUserProfileCommand("use0000001",
                         null, null, null, "taken@example.com", null)));
+    }
+
+    @Test
+    void refusesChangingTheEmailToAMistypedProvider() {
+        seedAda();
+
+        UndeliverableEmailException error = assertThrows(UndeliverableEmailException.class,
+                () -> updateProfile.update(new UpdateUserProfileCommand("use0000001",
+                        null, null, null, "ada@meil.com", null)));
+
+        assertTrue(error.getMessage().contains("did you mean mail.com?"));
+        assertEquals("ada@example.com", users.findActive("use0000001").orElseThrow().email().value());
+    }
+
+    @Test
+    void refusesChangingTheEmailToADomainThatCannotReceiveMail() {
+        seedAda();
+
+        assertThrows(UndeliverableEmailException.class,
+                () -> updateProfile.update(new UpdateUserProfileCommand("use0000001",
+                        null, null, null, "ada@nowhere.invalid", null)));
+
+        assertEquals("ada@example.com", users.findActive("use0000001").orElseThrow().email().value());
     }
 
     @Test

@@ -163,16 +163,18 @@ class SecureTokenGeneratorAdapterTest {
 
     @Test
     void doesNotRepeatItself() {
-        // 300 samples out of the 900,000 the generator can produce. A large sample would collide
-        // without anything being wrong: by the birthday bound, 5,000 draws from 900,000 are
-        // expected to repeat about a dozen times, which says nothing about the generator.
+        // 300 samples out of the 900,000 the generator can produce. Even a perfect generator repeats
+        // one of them about once in twenty runs (birthday bound: 300 x 299 / 2 / 900,000 = 0.05),
+        // so demanding 300 distinct codes made the suite fail now and then for nothing. Three or
+        // more repeats happen by chance about twice in a hundred thousand runs; a generator stuck
+        // on a few values produces them every time.
         Set<String> seen = new HashSet<>();
 
         for (int sample = 0; sample < 300; sample++) {
             seen.add(generator.generateNumericCode(6));
         }
 
-        assertEquals(300, seen.size(), "a generated code came back twice");
+        assertTrue(seen.size() >= 298, "generated codes repeat too often: " + (300 - seen.size()));
     }
 
     @Test

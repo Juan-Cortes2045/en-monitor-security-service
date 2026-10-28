@@ -2,9 +2,11 @@ package com.energymonitor.security.adapter.out.messaging;
 
 import com.energymonitor.security.adapter.out.messaging.SecurityMessagePayloads.AccountAdministeredPayload;
 import com.energymonitor.security.adapter.out.messaging.SecurityMessagePayloads.AccountDeletedPayload;
+import com.energymonitor.security.adapter.out.messaging.SecurityMessagePayloads.AccountFirstSignedInPayload;
 import com.energymonitor.security.adapter.out.messaging.SecurityMessagePayloads.AccountRegisteredPayload;
 import com.energymonitor.security.api.AccountAdministered;
 import com.energymonitor.security.api.AccountDeleted;
+import com.energymonitor.security.api.AccountFirstSignedIn;
 import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
 import org.springframework.stereotype.Component;
@@ -43,6 +45,13 @@ public class OutboxAccountEventPublisher implements AccountEventPublisherPort {
         outbox.write(SecurityMessageTypes.ACCOUNT_ADMINISTERED,
                 new AccountAdministeredPayload(event.actorId(), event.userId(),
                         event.action().name(), event.detail(), event.occurredAt()),
+                event.occurredAt(), null);
+    }
+
+    @Override
+    public void accountFirstSignedIn(AccountFirstSignedIn event) {
+        outbox.write(SecurityMessageTypes.ACCOUNT_FIRST_SIGNED_IN,
+                new AccountFirstSignedInPayload(event.userId(), event.occurredAt()),
                 event.occurredAt(), null);
     }
 }

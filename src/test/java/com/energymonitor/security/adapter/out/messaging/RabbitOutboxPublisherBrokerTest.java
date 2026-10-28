@@ -50,7 +50,7 @@ class RabbitOutboxPublisherBrokerTest {
         connections = new CachingConnectionFactory(HOST, PORT);
         connections.setUsername(env("RABBITMQ_USERNAME", "guest"));
         connections.setPassword(env("RABBITMQ_PASSWORD", "guest"));
-        connections.setPublisherConfirmType(CachingConnectionFactory.ConfirmType.SIMPLE);
+        connections.setPublisherConfirmType(CachingConnectionFactory.ConfirmType.CORRELATED);
         connections.setPublisherReturns(true);
         admin = new RabbitAdmin(connections);
         exchange = new TopicExchange("test.security." + UUID.randomUUID(), false, true);

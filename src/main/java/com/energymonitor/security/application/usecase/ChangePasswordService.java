@@ -2,6 +2,7 @@ package com.energymonitor.security.application.usecase;
 
 import com.energymonitor.security.application.command.ChangePasswordCommand;
 import com.energymonitor.security.application.exception.CurrentPasswordMismatchException;
+import com.energymonitor.security.application.exception.PasswordManagedByGoogleException;
 import com.energymonitor.security.application.exception.PasswordPolicyViolationException;
 import com.energymonitor.security.application.exception.UserNotFoundException;
 import com.energymonitor.security.application.port.in.ChangePassword;
@@ -19,6 +20,9 @@ import java.time.Instant;
 
 /**
  * Changes the password of an authenticated account.
+ *
+ * <p>An account created with Google has none to change: its password is a random one nobody
+ * knows, and its sign-in is Google's.
  */
 public class ChangePasswordService implements ChangePassword {
 
@@ -46,6 +50,10 @@ public class ChangePasswordService implements ChangePassword {
         Instant now = clock.instant();
         User user = userPort.findActive(command.idUser())
                 .orElseThrow(() -> new UserNotFoundException("no active user " + command.idUser()));
+        if (user.isGoogleAccount()) {
+            throw new PasswordManagedByGoogleException(
+                    "This account signs in with Google and has no password to change.");
+        }
         if (!passwordHasher.matches(command.currentPassword(), user.passwordHash())) {
             throw new CurrentPasswordMismatchException("current password does not match");
         }

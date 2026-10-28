@@ -1,6 +1,6 @@
 package com.energymonitor.security.infrastructure;
 
-import com.energymonitor.security.adapter.out.backend.HttpAccountDeletionGuard;
+import com.energymonitor.security.adapter.out.home.HttpAccountDeletionGuard;
 import com.energymonitor.security.application.port.out.AccountDeletionGuardPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,14 +17,15 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.client.RestClient;
 
 /**
- * The calls between this service and energy-monitor-backend, both ways.
+ * The calls between this service and the others, both ways.
  *
- * <p>Inbound, {@code /internal/**} gets its own filter chain, evaluated before the API chain: the
- * backend presents no JWT, so it is trusted by network and shared token instead (see
- * {@link InternalCallerCheck}). Anything else is answered 403. The reverse proxy must not forward
- * {@code /internal/**} at all, since behind it every request seems to come from the proxy.
+ * <p>Inbound, {@code /internal/**} gets its own filter chain, evaluated before the API chain:
+ * energy-monitor-backend and the home service present no JWT, so they are trusted by network and
+ * shared token instead (see {@link InternalCallerCheck}). Anything else is answered 403. The
+ * reverse proxy must not forward {@code /internal/**} at all, since behind it every request seems
+ * to come from the proxy.
  *
- * <p>Outbound, the client that asks the backend whether an account may be deleted.
+ * <p>Outbound, the client that asks the home service whether an account may be deleted.
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(InternalApiProperties.class)
@@ -60,7 +61,7 @@ public class InternalApiConfiguration {
         requests.setConnectTimeout(properties.connectTimeout());
         requests.setReadTimeout(properties.readTimeout());
         RestClient client = RestClient.builder()
-                .baseUrl(properties.backendUrl().toString())
+                .baseUrl(properties.homeServiceUrl().toString())
                 .requestFactory(requests)
                 .defaultHeader(InternalApiProperties.TOKEN_HEADER,
                         properties.token() == null ? "" : properties.token())

@@ -5,8 +5,8 @@ import com.energymonitor.security.application.exception.AccountDeletionCheckUnav
 
 /**
  * Output port for asking the services that keep data about an account whether it may be deleted
- * now. Today that is energy-monitor-backend, which refuses while the account is the only owner of
- * a home that still has other members.
+ * now. Today that is the home service, which refuses while the account is the only owner of a home
+ * that still has other members.
  */
 public interface AccountDeletionGuardPort {
 

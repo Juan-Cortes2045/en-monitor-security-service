@@ -24,5 +24,11 @@ public enum AuthenticationStatus {
      * The password matched, but the account has not confirmed its address. Classified only after
      * the password check, so it tells nothing to whoever does not know the password.
      */
-    EMAIL_NOT_VERIFIED
+    EMAIL_NOT_VERIFIED,
+
+    /**
+     * The password matched and the address is verified, but the account never accepted the terms
+     * and conditions, and the attempt did not accept them either. No session until it does.
+     */
+    TERMS_NOT_ACCEPTED
 }

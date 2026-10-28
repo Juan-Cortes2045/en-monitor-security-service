@@ -17,6 +17,7 @@ import com.energymonitor.security.adapter.in.web.dto.ProfileResponse;
 import com.energymonitor.security.adapter.in.web.dto.RefreshRequest;
 import com.energymonitor.security.adapter.in.web.dto.RefreshResponse;
 import com.energymonitor.security.adapter.in.web.dto.RegisterRequest;
+import com.energymonitor.security.adapter.in.web.dto.RegistrationResponse;
 import com.energymonitor.security.adapter.in.web.dto.ResendVerificationRequest;
 import com.energymonitor.security.adapter.in.web.dto.ResetPasswordRequest;
 import com.energymonitor.security.adapter.in.web.dto.UpdateProfileRequest;
@@ -178,33 +179,33 @@ public class AuthController {
     }
 
     /**
-     * Registers an account. Open by design: a caller has no identity yet.
+     * Asks for an account. Open by design: a caller has no identity yet.
      *
      * @param request the registration body
      * @param servlet used only for the caller's address
-     * @return the created account, without its password hash
+     * @return the address the code was sent to and when the request expires
      */
     @Operation(summary = "Register an account",
-            description = "Creates an account from the supplied email, password and name, and "
-                    + "returns the created account without any credential field. Open by "
-                    + "design: a caller has no identity yet, so there is nothing to "
-                    + "authenticate.")
+            description = "Validates the supplied email, password and name, keeps them as a "
+                    + "registration waiting for its verification code and mails the code. No "
+                    + "account exists until POST /auth/email/verify confirms the code: an "
+                    + "address nobody reads never becomes an account, and its registration is "
+                    + "forgotten after 24 hours. Registering again with the same address "
+                    + "replaces the earlier registration and sends a new code. Open by design: a "
+                    + "caller has no identity yet, so there is nothing to authenticate.")
     @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "Account created",
+            @ApiResponse(responseCode = "202", description = "Registration accepted; the code "
+                    + "was sent to the address",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
-                            schema = @Schema(implementation = AccountResponse.class),
+                            schema = @Schema(implementation = RegistrationResponse.class),
                             examples = @ExampleObject(value = """
                                     {
-                                      "idUser": "USR-1a2b3c4d5e",
-                                      "idPerson": "PER-9f8e7d6c5b",
                                       "email": "ada@example.com",
-                                      "status": "ACTIVE",
-                                      "lastLogin": null,
-                                      "profileImage": null
+                                      "expiresAt": "2026-10-27T15:04:05Z"
                                     }"""))),
             @ApiResponse(responseCode = "400", description = "Validation error: the body is "
-                    + "missing a field, the email is malformed, or its domain does not exist or "
-                    + "cannot receive mail (no MX nor address record)",
+                    + "missing a field, the email is malformed, its domain looks like a "
+                    + "mistyped provider, or it does not exist or cannot receive mail",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class))),
             @ApiResponse(responseCode = "409", description = "An account already exists for "
@@ -214,27 +215,33 @@ public class AuthController {
             @ApiResponse(responseCode = "422", description = "The password is well-formed but "
                     + "breaks the configured policy",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "428", description = "acceptTerms is not true: the "
+                    + "client shows "
+                    + "the terms and conditions and repeats the request with acceptTerms: true",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class)))
     })
     @PostMapping("/register")
-    public ResponseEntity<AccountResponse> register(@Valid @RequestBody RegisterRequest request,
-                                                    HttpServletRequest servlet) {
-        var account = registerUser.register(new RegisterUserCommand(request.email(),
+    public ResponseEntity<RegistrationResponse> register(@Valid @RequestBody RegisterRequest request,
+                                                         HttpServletRequest servlet) {
+        var registration = registerUser.register(new RegisterUserCommand(request.email(),
                 request.password(), request.name(), request.lastName(),
-                request.profileImage(), clientIp(servlet)));
-        // After the account is committed, and never able to fail the registration: a mail outage
-        // must not leave a created account behind a 500. The client can ask for a new code.
+                request.profileImage(), clientIp(servlet), request.acceptsTerms()));
+        // After the registration is committed, and never able to fail it: a mail outage must not
+        // answer 500 for a registration that was kept. The client can ask for a new code.
         try {
-            emailVerification.sendCode(account.email().value());
+            emailVerification.sendCode(registration.email().value());
         } catch (RuntimeException undeliverable) {
-            LOG.warn("The verification code for a new account could not be sent", undeliverable);
+            LOG.warn("The verification code for a new registration could not be sent", undeliverable);
         }
-        return ResponseEntity.status(HttpStatus.CREATED).body(AccountResponse.from(account));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(RegistrationResponse.from(registration));
     }
 
     @Operation(summary = "Verify the account's email",
-            description = "Checks the six-digit code sent to the address at registration and "
-                    + "marks the address as verified. An unknown address and a wrong or expired "
+            description = "Checks the six-digit code sent to the address. For a registration, "
+                    + "this is when the account is created, already verified; for an account "
+                    + "whose address changed, it marks the address as verified. An unknown address and a wrong or expired "
                     + "code produce the same 400, so the endpoint cannot be used to learn which "
                     + "addresses are registered. Repeating it with a valid code is harmless.")
     @ApiResponses({
@@ -343,6 +350,11 @@ public class AuthController {
                     + "account has not verified its email address: the client requests a code "
                     + "(/email/verification/resend) and confirms it (/email/verify) before signing in",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "428", description = "The account never accepted the "
+                    + "terms and conditions: the client shows "
+                    + "the terms and conditions and repeats the request with acceptTerms: true",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class)))
     })
     @PostMapping("/login")
@@ -350,22 +362,26 @@ public class AuthController {
                                                HttpServletRequest servlet,
                                                HttpServletResponse response) {
         SecurityLoginFlow.LoginOutcome login = loginFlow.login(request.email(), request.password(),
-                clientIp(servlet), servlet.getHeader("User-Agent"))
+                request.acceptsTerms(), clientIp(servlet), servlet.getHeader("User-Agent"))
                 .orElseThrow(AuthenticationRejectedException::new);
         return ResponseEntity.ok(loginResponse(login, servlet, response));
     }
 
     @Operation(summary = "Sign in with Google",
-            description = "Exchanges the authorization code of Google's sign-in popup for the "
-                    + "usual credentials. The first time it creates the account with the name, "
+            description = "Exchanges the authorization code of Google's sign-in popup (web, "
+                    + "{code}) or the ID token of the native sign-in (mobile app, {idToken}) for "
+                    + "the usual credentials. The first time it creates the account with the name, "
                     + "last name, photo and address of the Google account. An address that "
                     + "belongs to an account registered with a password is refused with 409.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Signed in",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = LoginResponse.class))),
-            @ApiResponse(responseCode = "401", description = "Invalid or expired code, or an "
-                    + "address Google did not verify",
+            @ApiResponse(responseCode = "400", description = "Neither or both of code and idToken",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "401", description = "Invalid or expired code or ID "
+                    + "token, or an address Google did not verify",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class))),
             @ApiResponse(responseCode = "403", description = "The account is blocked or inactive",
@@ -377,14 +393,22 @@ public class AuthController {
                             schema = @Schema(implementation = ApiError.class))),
             @ApiResponse(responseCode = "503", description = "Google sign-in is not configured",
                     content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "428", description = "The account is new or never "
+                    + "accepted the terms and conditions: the client shows "
+                    + "the terms and conditions and repeats the request with acceptTerms: true",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
                             schema = @Schema(implementation = ApiError.class)))
     })
     @PostMapping("/google")
     public ResponseEntity<LoginResponse> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request,
                                                          HttpServletRequest servlet,
                                                          HttpServletResponse response) {
-        SecurityLoginFlow.LoginOutcome login = loginFlow.loginWithGoogle(request.code(),
-                clientIp(servlet), servlet.getHeader("User-Agent"))
+        String ip = clientIp(servlet);
+        String userAgent = servlet.getHeader("User-Agent");
+        SecurityLoginFlow.LoginOutcome login = (request.hasIdToken()
+                ? loginFlow.loginWithGoogleIdToken(request.idToken(), request.acceptsTerms(), ip, userAgent)
+                : loginFlow.loginWithGoogle(request.code(), request.acceptsTerms(), ip, userAgent))
                 .orElseThrow(AuthenticationRejectedException::new);
         return ResponseEntity.ok(loginResponse(login, servlet, response));
     }
@@ -746,11 +770,10 @@ public class AuthController {
      * address and the avatar, is committed in the same transaction but is not echoed here; it is
      * read from {@code GET /api/v1/auth/account}.
      *
-     * <p><strong>Partial updates, and the name as a pair.</strong> Every field is optional and an
-     * absent one is left untouched. The name is the exception worth stating plainly: a person
-     * is required to have both a first name and a last name (INV-001) and the aggregate replaces
-     * them together, so sending one of the two leaves both of them unchanged. A client renames by
-     * sending both.
+     * <p><strong>Partial updates.</strong> Every field is optional and an absent one is left
+     * untouched, the two halves of the name included: {@code name} alone keeps the last name and
+     * {@code lastName} alone keeps the first name. The first name is required, so a blank one is
+     * 400; the last name is optional, so a blank one removes it.
      *
      * <p><strong>No phone number is accepted, stored or returned.</strong> Notifications are
      * email only, so the field was removed from the domain, from the {@code person} table and
@@ -838,6 +861,33 @@ public class AuthController {
         return ResponseEntity.ok(ProfileResponse.from(updated));
     }
 
+    @Operation(summary = "Send the code that confirms deleting a Google account",
+            description = "An account created with Google has no password the person knows, so "
+                    + "it confirms its deletion with a six-digit code mailed to its address, "
+                    + "valid for 15 to 30 minutes. An account with a password confirms with it "
+                    + "instead (409). While the notification service does not deliver this mail "
+                    + "yet, the answer is 503 and nothing is sent.",
+            security = @SecurityRequirement(name = "bearerAuth"))
+    @ApiResponses({
+            @ApiResponse(responseCode = "202", description = "Code sent, empty body",
+                    content = @Content),
+            @ApiResponse(responseCode = "401", description = "Missing, malformed or expired token",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "409", description = "The account has a password; it "
+                    + "confirms its deletion with it",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class))),
+            @ApiResponse(responseCode = "503", description = "The code cannot be mailed yet",
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = ApiError.class)))
+    })
+    @PostMapping("/account/delete/code")
+    public ResponseEntity<Void> sendDeletionCode(Authentication authentication) {
+        deleteAccount.sendDeletionCode(authentication.getName());
+        return ResponseEntity.accepted().build();
+    }
+
     @Operation(summary = "Delete the caller's own account",
             description = "Confirms the current password, then soft-deletes the account and its "
                     + "person (deleted_at), closes its sessions and drops its home memberships. "
@@ -867,7 +917,7 @@ public class AuthController {
                                               HttpServletRequest servlet,
                                               HttpServletResponse response) {
         deleteAccount.delete(new DeleteAccountCommand(authentication.getName(), request.password(),
-                clientIp(servlet)));
+                request.code(), clientIp(servlet)));
         if (sessionCookies.requested(servlet)) {
             sessionCookies.clear(response);
         }

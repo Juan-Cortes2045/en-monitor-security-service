@@ -1,6 +1,9 @@
 package com.energymonitor.security.infrastructure;
 
 import com.energymonitor.security.adapter.out.dns.DnsEmailDomainCheckAdapter;
+import com.energymonitor.security.application.port.out.AccountDeletionCodeDeliveryPort;
+import com.energymonitor.security.application.exception.AccountDeletionCodeUnavailableException;
+import com.energymonitor.security.adapter.out.messaging.OutboxMailDeliveryAdapter;
 import com.energymonitor.security.adapter.out.security.InMemoryResetAttemptLimiter;
 import com.energymonitor.security.adapter.out.security.PepperedHmacResetCodeHasher;
 import com.energymonitor.security.api.AdministratorQuery;
@@ -30,6 +33,9 @@ import com.energymonitor.security.application.port.out.AccountDeletionGuardPort;
 import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
 import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
 import com.energymonitor.security.application.port.out.EmailDomainCheckPort;
+import com.energymonitor.security.application.usecase.PurgePendingRegistrationsService;
+import com.energymonitor.security.application.port.out.PendingRegistrationPersistencePort;
+import com.energymonitor.security.application.port.in.PurgePendingRegistrations;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
 import com.energymonitor.security.application.port.out.LoginErrorLogPersistencePort;
 import com.energymonitor.security.application.port.out.PasswordHasherPort;
@@ -222,17 +228,25 @@ public class SecurityApplicationWiring {
     }
 
     @Bean
-    public RegisterUser registerUser(UserPersistencePort users, PersonPersistencePort persons,
+    public RegisterUser registerUser(UserPersistencePort users,
+                                     PendingRegistrationPersistencePort registrations,
                                      PasswordPolicyPersistencePort policies,
                                      PasswordHasherPort hasher, IdentifierGeneratorPort identifiers,
-                                     AuditLogPersistencePort audits,
-                                     AccountEventPublisherPort events,
                                      EmailDomainCheckPort emailDomains, Clock clock,
                                      PlatformTransactionManager transactions) {
         return transactional(transactions,
-                new RegisterUserService(users, persons, policies, hasher, identifiers, audits,
-                        events, emailDomains, clock),
+                new RegisterUserService(users, registrations, policies, hasher, identifiers,
+                        emailDomains, clock),
                 RegisterUser.class);
+    }
+
+    @Bean
+    public PurgePendingRegistrations purgePendingRegistrations(
+            PendingRegistrationPersistencePort registrations, Clock clock,
+            PlatformTransactionManager transactions) {
+        return transactional(transactions,
+                new PurgePendingRegistrationsService(registrations, clock),
+                PurgePendingRegistrations.class);
     }
 
     @Bean
@@ -250,14 +264,17 @@ public class SecurityApplicationWiring {
     }
 
     @Bean
-    public AuthenticateUser authenticateUser(UserPersistencePort users, PasswordHasherPort hasher,
+    public AuthenticateUser authenticateUser(UserPersistencePort users,
+                                             PendingRegistrationPersistencePort registrations,
+                                             PasswordHasherPort hasher,
                                              IdentifierGeneratorPort identifiers,
                                              AuditLogPersistencePort audits,
-                                             LoginErrorLogPersistencePort loginErrorLog, Clock clock,
+                                             LoginErrorLogPersistencePort loginErrorLog,
+                                             AccountEventPublisherPort events, Clock clock,
                                              PlatformTransactionManager transactions) {
         return transactional(transactions,
-                new AuthenticateUserService(users, hasher, identifiers, audits, loginErrorLog,
-                        clock),
+                new AuthenticateUserService(users, registrations, hasher, identifiers, audits,
+                        loginErrorLog, events, clock),
                 AuthenticateUser.class);
     }
 
@@ -265,10 +282,12 @@ public class SecurityApplicationWiring {
     public UpdateUserProfile updateUserProfile(UserPersistencePort users,
                                                PersonPersistencePort persons,
                                                AuditLogPersistencePort audits,
-                                               IdentifierGeneratorPort identifiers, Clock clock,
+                                               IdentifierGeneratorPort identifiers,
+                                               EmailDomainCheckPort emailDomains, Clock clock,
                                                PlatformTransactionManager transactions) {
         return transactional(transactions,
-                new UpdateUserProfileService(users, persons, audits, identifiers, clock),
+                new UpdateUserProfileService(users, persons, audits, identifiers, emailDomains,
+                        clock),
                 UpdateUserProfile.class);
     }
 
@@ -360,11 +379,17 @@ public class SecurityApplicationWiring {
      */
     @Bean
     public EmailVerification emailVerification(UserPersistencePort users,
+                                               PendingRegistrationPersistencePort registrations,
+                                               PersonPersistencePort persons,
+                                               AuditLogPersistencePort audits,
+                                               AccountEventPublisherPort events,
+                                               IdentifierGeneratorPort identifiers,
                                                PasswordResetTokenHasherPort tokenHasher,
                                                EmailVerificationDeliveryPort delivery, Clock clock,
                                                PlatformTransactionManager transactions) {
         return transactional(transactions,
-                new EmailVerificationService(users, tokenHasher, delivery,
+                new EmailVerificationService(users, registrations, persons, audits, events,
+                        identifiers, tokenHasher, delivery,
                         new InMemoryResetAttemptLimiter(5, Duration.ofMinutes(15), clock), clock),
                 EmailVerification.class);
     }
@@ -386,12 +411,37 @@ public class SecurityApplicationWiring {
                                        PasswordHasherPort hasher, AuditLogPersistencePort audits,
                                        AccountEventPublisherPort events,
                                        AccountDeletionGuardPort deletionGuard,
-                                       IdentifierGeneratorPort identifiers, Clock clock,
+                                       IdentifierGeneratorPort identifiers,
+                                       PasswordResetTokenHasherPort codeHasher,
+                                       AccountDeletionCodeDeliveryPort codeDelivery, Clock clock,
                                        PlatformTransactionManager transactions) {
+        // Five guesses per account per window, like the verification code: a six-digit code is
+        // only safe while guessing is bounded.
         return transactional(transactions,
                 new DeleteAccountService(users, persons, sessions, hasher, audits, events,
-                        deletionGuard, identifiers, clock),
+                        deletionGuard, identifiers, codeHasher, codeDelivery,
+                        new InMemoryResetAttemptLimiter(5, Duration.ofMinutes(15), clock), clock),
                 DeleteAccount.class);
+    }
+
+    /**
+     * Where the deletion code of an account created with Google goes. Off by default: the
+     * notification service does not deliver {@code mail.account-deletion} yet, and a message no
+     * queue takes stays first in the outbox and holds back every mail behind it. Until
+     * {@code security.account-deletion.code-mail-enabled=true}, asking for the code answers 503
+     * and nothing is written.
+     */
+    @Bean
+    public AccountDeletionCodeDeliveryPort accountDeletionCodeDelivery(
+            @Value("${security.account-deletion.code-mail-enabled:false}") boolean enabled,
+            OutboxMailDeliveryAdapter mail) {
+        if (enabled) {
+            return mail::deliverAccountDeletionCode;
+        }
+        return (userId, recipient, code, validUntil) -> {
+            throw new AccountDeletionCodeUnavailableException(
+                    "The deletion code cannot be mailed yet.");
+        };
     }
 
     @Bean

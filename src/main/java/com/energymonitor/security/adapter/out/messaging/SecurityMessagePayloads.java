@@ -24,9 +24,18 @@ public final class SecurityMessagePayloads {
     public record AccountDeletedPayload(String userId, Instant deletedAt) {
     }
 
+    /** {@code account.first-signed-in} */
+    public record AccountFirstSignedInPayload(String userId, Instant occurredAt) {
+    }
+
     /** {@code mail.email-verification} */
     public record EmailVerificationPayload(String userId, String recipient, String code,
                                            Instant validUntil) {
+    }
+
+    /** {@code mail.account-deletion}: the same shape as the verification mail. */
+    public record AccountDeletionCodePayload(String userId, String recipient, String code,
+                                             Instant validUntil) {
     }
 
     /** {@code mail.password-reset} */

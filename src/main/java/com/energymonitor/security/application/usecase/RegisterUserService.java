@@ -1,65 +1,62 @@
 package com.energymonitor.security.application.usecase;
 
-import com.energymonitor.security.api.AccountRegistered;
 import com.energymonitor.security.application.command.RegisterUserCommand;
 import com.energymonitor.security.application.exception.EmailAlreadyRegisteredException;
 import com.energymonitor.security.application.exception.PasswordPolicyViolationException;
-import com.energymonitor.security.application.exception.UndeliverableEmailException;
+import com.energymonitor.security.application.exception.TermsNotAcceptedException;
 import com.energymonitor.security.application.port.in.RegisterUser;
-import com.energymonitor.security.application.port.out.AccountEventPublisherPort;
-import com.energymonitor.security.application.port.out.AuditLogPersistencePort;
 import com.energymonitor.security.application.port.out.EmailDomainCheckPort;
 import com.energymonitor.security.application.port.out.IdentifierGeneratorPort;
 import com.energymonitor.security.application.port.out.PasswordHasherPort;
 import com.energymonitor.security.application.port.out.PasswordPolicyPersistencePort;
-import com.energymonitor.security.application.port.out.PersonPersistencePort;
+import com.energymonitor.security.application.port.out.PendingRegistrationPersistencePort;
 import com.energymonitor.security.application.port.out.UserPersistencePort;
-import com.energymonitor.security.domain.model.AuditAction;
-import com.energymonitor.security.domain.model.AuditLog;
 import com.energymonitor.security.domain.model.Email;
 import com.energymonitor.security.domain.model.PasswordPolicy;
-import com.energymonitor.security.domain.model.Person;
-import com.energymonitor.security.domain.model.User;
+import com.energymonitor.security.domain.model.PendingRegistration;
 import java.time.Clock;
-import java.time.Instant;
 
 /**
- * Registers a {@code Person} and its {@code User} account.
+ * Asks for a new account: validates the request and keeps it until its address is verified.
+ *
+ * <p>No {@code person} nor {@code user} row is written here. They are created by
+ * {@link EmailVerificationService} when the code sent to the address comes back, so an address
+ * nobody reads never becomes an account. Registering again with the same address replaces the
+ * earlier request (a mistyped password can be fixed that way) and invalidates its code, which is
+ * derived from the identifier the request reserves. The terms and conditions have to be accepted:
+ * the request records that they were, at the instant it was made.
  */
 public class RegisterUserService implements RegisterUser {
 
     private final UserPersistencePort userPort;
-    private final PersonPersistencePort personPort;
+    private final PendingRegistrationPersistencePort pendingPort;
     private final PasswordPolicyPersistencePort passwordPolicyPort;
     private final PasswordHasherPort passwordHasher;
     private final IdentifierGeneratorPort identifiers;
-    private final AuditLogPersistencePort auditLogPort;
-    private final AccountEventPublisherPort events;
     private final EmailDomainCheckPort emailDomains;
     private final Clock clock;
 
-    public RegisterUserService(UserPersistencePort userPort, PersonPersistencePort personPort,
+    public RegisterUserService(UserPersistencePort userPort,
+                               PendingRegistrationPersistencePort pendingPort,
                                PasswordPolicyPersistencePort passwordPolicyPort,
                                PasswordHasherPort passwordHasher,
                                IdentifierGeneratorPort identifiers,
-                               AuditLogPersistencePort auditLogPort,
-                               AccountEventPublisherPort events,
                                EmailDomainCheckPort emailDomains, Clock clock) {
         this.userPort = userPort;
-        this.personPort = personPort;
+        this.pendingPort = pendingPort;
         this.passwordPolicyPort = passwordPolicyPort;
         this.passwordHasher = passwordHasher;
         this.identifiers = identifiers;
-        this.auditLogPort = auditLogPort;
-        this.events = events;
         this.emailDomains = emailDomains;
         this.clock = clock;
     }
 
     @Override
-    public User register(RegisterUserCommand command) {
-        Instant now = clock.instant();
+    public PendingRegistration register(RegisterUserCommand command) {
         Email email = Email.of(command.email());
+        if (!command.acceptTerms()) {
+            throw new TermsNotAcceptedException("Accept the terms and conditions to register.");
+        }
         PasswordPolicy policy = passwordPolicyPort.activePolicy()
                 .orElseThrow(() -> new IllegalStateException("no active password policy is configured"));
         if (!policy.isSatisfiedBy(command.rawPassword())) {
@@ -69,24 +66,11 @@ public class RegisterUserService implements RegisterUser {
             throw new EmailAlreadyRegisteredException("an account already exists for " + email);
         }
         // An invented or mistyped domain can never receive the verification code: refused before
-        // anything is created. Whether the mailbox itself exists is what the code then proves.
-        if (!emailDomains.acceptsMail(email.domain())) {
-            throw new UndeliverableEmailException("The domain of the email address does not exist "
-                    + "or cannot receive mail.");
-        }
+        // anything is stored. Whether the mailbox itself exists is what the code then proves.
+        DeliverableEmail.require(email, emailDomains);
 
-        Person person = new Person(identifiers.generate(), command.name(), command.lastName());
-        personPort.save(person);
-
-        // The avatar belongs to the account, not to the person: person only describes the human.
-        User user = User.register(identifiers.generate(), person.idPerson(),
-                passwordHasher.hash(command.rawPassword()), email, now,
-                command.profileImage());
-        userPort.save(user);
-
-        auditLogPort.save(new AuditLog(identifiers.generate(), user.idUser(), AuditAction.CREATE,
-                null, command.ipAddress(), null, now));
-        events.accountRegistered(new AccountRegistered(user.idUser(), email.value(), now));
-        return user;
+        return pendingPort.save(PendingRegistration.request(identifiers.generate(), email,
+                command.name(), command.lastName(), passwordHasher.hash(command.rawPassword()),
+                command.profileImage(), command.ipAddress(), clock.instant()));
     }
 }

@@ -84,6 +84,48 @@ class UserPersonPersistenceTest extends JwtKeyedTest {
     }
 
     @Test
+    void theAcceptanceOfTheTermsRoundTripsAndItsAbsenceToo() {
+        PersistenceFixtures.seedPerson(persons);
+        User user = new User(USER_ID, PERSON_ID, PasswordHash.of(HASH),
+                Email.of("ada@example.com"), true, REGISTRATION,
+                UserStatus.ACTIVE, 0, null, null);
+        users.save(user);
+        flushAndClear();
+        assertTrue(users.findActive(USER_ID).orElseThrow().termsAcceptedAt().isEmpty());
+
+        User read = users.findActive(USER_ID).orElseThrow();
+        read.acceptTerms(REGISTRATION);
+        users.save(read);
+        flushAndClear();
+        assertEquals(REGISTRATION, users.findActive(USER_ID).orElseThrow().termsAcceptedAt().orElseThrow());
+    }
+
+    @Test
+    void deletingAGoogleAccountReleasesItsGoogleSubjectSoItCanSignUpAgain() {
+        PersistenceFixtures.seedPerson(persons);
+        User google = new User(USER_ID, PERSON_ID, PasswordHash.of(HASH),
+                Email.of("ana@gmail.com"), true, REGISTRATION, UserStatus.ACTIVE, 0, null, null);
+        google.bindGoogleAccount("google-sub-1");
+        users.save(google);
+        flushAndClear();
+
+        users.softDelete(USER_ID, REGISTRATION.plusSeconds(60));
+        flushAndClear();
+        assertTrue(users.findActiveByGoogleSubject("google-sub-1").isEmpty());
+
+        // The same Google account signs up again: a new row with the same subject and address.
+        persons.save(new Person("per0000002", "Ana", null));
+        User again = new User("use0000002", "per0000002", PasswordHash.of(HASH),
+                Email.of("ana@gmail.com"), true, REGISTRATION.plusSeconds(120), UserStatus.ACTIVE,
+                0, null, null);
+        again.bindGoogleAccount("google-sub-1");
+        users.save(again);
+        flushAndClear();
+
+        assertEquals("use0000002", users.findActiveByGoogleSubject("google-sub-1").orElseThrow().idUser());
+    }
+
+    @Test
     void anAccountWithoutAvatarRoundTripsAsAbsent() {
         PersistenceFixtures.seedPerson(persons);
         users.save(new User(USER_ID, PERSON_ID, PasswordHash.of(HASH),

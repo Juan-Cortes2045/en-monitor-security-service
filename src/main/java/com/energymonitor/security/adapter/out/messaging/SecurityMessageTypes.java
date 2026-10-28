@@ -20,14 +20,25 @@ public final class SecurityMessageTypes {
     /** An account was deleted: its memberships and the homes it alone owned must go. */
     public static final String ACCOUNT_DELETED = "account.deleted";
 
+    /** An account signed in for the first time, its address verified: its owner is welcomed. */
+    public static final String ACCOUNT_FIRST_SIGNED_IN = "account.first-signed-in";
+
     /** A verification code to mail. Carries the code in clear text. */
     public static final String MAIL_EMAIL_VERIFICATION = "mail.email-verification";
 
     /** A password recovery code to mail. Carries the code in clear text. */
     public static final String MAIL_PASSWORD_RESET = "mail.password-reset";
 
+    /**
+     * The code that confirms the deletion of an account created with Google. Carries the code in
+     * clear text. The notification service does not consume it yet: it is only published once
+     * {@code security.account-deletion.code-mail-enabled} is turned on.
+     */
+    public static final String MAIL_ACCOUNT_DELETION = "mail.account-deletion";
+
     /** The types whose payload holds a secret and is wiped once the broker confirms it. */
-    public static final Set<String> CARRY_SECRETS = Set.of(MAIL_EMAIL_VERIFICATION, MAIL_PASSWORD_RESET);
+    public static final Set<String> CARRY_SECRETS = Set.of(MAIL_EMAIL_VERIFICATION, MAIL_PASSWORD_RESET,
+            MAIL_ACCOUNT_DELETION);
 
     private SecurityMessageTypes() {
     }
