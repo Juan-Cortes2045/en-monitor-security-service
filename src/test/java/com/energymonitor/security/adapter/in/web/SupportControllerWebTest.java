@@ -37,8 +37,8 @@ class SupportControllerWebTest extends JwtKeyedTest {
     void listsTheActiveAdministratorsByNameWithoutAToken() throws Exception {
         given(administrators.activeAdministratorIds()).willReturn(List.of("adm0000002", "adm0000001"));
         given(profiles.findByIds(any())).willReturn(Map.of(
-                "adm0000002", new UserProfile("adm0000002", "Sofía", "Ríos", "sofia@energymonitor.co"),
-                "adm0000001", new UserProfile("adm0000001", "Andrés", "Gil", "andres@energymonitor.co")));
+                "adm0000002", new UserProfile("adm0000002", "Sofía", "Ríos", "sofia@energymonitor.co", null),
+                "adm0000001", new UserProfile("adm0000001", "Andrés", "Gil", "andres@energymonitor.co", null)));
 
         mvc.perform(get("/api/v1/support/contacts"))
                 .andExpect(status().isOk())
@@ -53,7 +53,7 @@ class SupportControllerWebTest extends JwtKeyedTest {
     void usesTheAddressWhenAnAdministratorHasNoName() throws Exception {
         given(administrators.activeAdministratorIds()).willReturn(List.of("adm0000001"));
         given(profiles.findByIds(any())).willReturn(Map.of(
-                "adm0000001", new UserProfile("adm0000001", " ", null, "soporte@energymonitor.co")));
+                "adm0000001", new UserProfile("adm0000001", " ", null, "soporte@energymonitor.co", null)));
 
         mvc.perform(get("/api/v1/support/contacts"))
                 .andExpect(status().isOk())

@@ -198,7 +198,7 @@ class AuthControllerWebTest extends JwtKeyedTest {
     void returnsTheAccountWithTheNameOfItsPerson() throws Exception {
         given(findUser.findByIdentifier("USR0000001")).willReturn(Optional.of(newAccount()));
         given(userProfileQuery.findByIds(List.of("USR0000001"))).willReturn(java.util.Map.of(
-                "USR0000001", new UserProfile("USR0000001", "Ada", "Lovelace", EMAIL)));
+                "USR0000001", new UserProfile("USR0000001", "Ada", "Lovelace", EMAIL, null)));
 
         mvc.perform(get("/api/v1/auth/account").header("Authorization", bearerFor(identity())))
                 .andExpect(status().isOk())
