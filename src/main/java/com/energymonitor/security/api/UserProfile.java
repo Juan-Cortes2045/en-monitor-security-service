@@ -9,6 +9,8 @@ package com.energymonitor.security.api;
  * @param name     first name of the person behind the account
  * @param lastName last name of the person behind the account
  * @param email    the account's address
+ * @param profileImage the avatar the person chose (a data URL), {@code null} when there is none
  */
-public record UserProfile(String userId, String name, String lastName, String email) {
+public record UserProfile(String userId, String name, String lastName, String email,
+                          String profileImage) {
 }

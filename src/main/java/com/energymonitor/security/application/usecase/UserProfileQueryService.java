@@ -31,7 +31,8 @@ public class UserProfileQueryService implements UserProfileQuery {
                 users.findActive(userId).ifPresent(user ->
                         persons.findActive(user.idPerson()).ifPresent(person ->
                                 profiles.put(userId, new UserProfile(userId, person.name(),
-                                        person.lastName(), user.email().value())))));
+                                        person.lastName(), user.email().value(),
+                                        user.profileImage().orElse(null))))));
         return profiles;
     }
 }
